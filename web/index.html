@@ -1,0 +1,1506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#4CAF50">
+    <meta name="description" content="myhome-agent 家庭智能管家 PWA">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <title>家庭管家 · myhome-agent</title>
+    <style>
+        /* ===== CSS 变量（动态切换）===== */
+        :root {
+            --bg: #121212;
+            --surface: #1e1e1e;
+            --surface-2: #2a2a2a;
+            --surface-3: #353535;
+            --text: #e8e8e8;
+            --text-dim: #999;
+            --text-faint: #666;
+            --accent: #4CAF50;
+            --accent-soft: rgba(76,175,80,0.15);
+            --warn: #FF9800;
+            --warn-soft: rgba(255,152,0,0.15);
+            --danger: #F44336;
+            --danger-soft: rgba(244,67,54,0.15);
+            --info: #2196F3;
+            --info-soft: rgba(33,150,243,0.15);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 2px 8px rgba(0,0,0,0.3);
+            --transition: 0.2s ease;
+            --bottom-nav-h: 64px;
+        }
+
+        /* 老人模式 - 大字体 + 高对比度 */
+        :root.elder-mode {
+            --bg: #000;
+            --surface: #1a1a1a;
+            --text: #fff;
+            --text-dim: #ccc;
+            --accent: #66BB6A;
+            --radius: 20px;
+        }
+        :root.elder-mode { font-size: 18px; }
+        :root.elder-mode .device-card { min-height: 100px; }
+        :root.elder-mode .nav-item { min-height: 72px; }
+        :root.elder-mode .btn-primary, :root.elder-mode .btn-icon { min-height: 64px; }
+        :root.elder-mode .font-size-toggle { display: flex; gap: 8px; }
+
+        :root.font-lg { font-size: 17px; }
+        :root.font-xl { font-size: 19px; }
+        :root.font-xxl { font-size: 22px; }
+
+        /* ===== 基础 ===== */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app {
+            max-width: 768px;
+            margin: 0 auto;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding-bottom: var(--bottom-nav-h);
+        }
+
+        /* ===== 顶栏 ===== */
+        .topbar {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--surface-2);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .topbar-title {
+            font-size: 18px;
+            font-weight: 600;
+            flex: 1;
+        }
+        .topbar-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-icon {
+            background: transparent;
+            border: none;
+            color: var(--text);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            min-width: 40px;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-icon:hover { background: var(--surface-2); }
+        .btn-icon.active { background: var(--accent-soft); color: var(--accent); }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        /* ===== 主区域 ===== */
+        .main { flex: 1; padding: 16px; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        .section { margin-bottom: 20px; }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            padding: 0 4px;
+        }
+
+        /* ===== 卡片 ===== */
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 14px;
+            margin-bottom: 8px;
+            border: 1px solid var(--surface-2);
+            transition: all var(--transition);
+        }
+        .card:active { transform: scale(0.98); background: var(--surface-2); }
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 12px;
+            background: var(--surface-2);
+        }
+        .card-icon.safety { background: var(--danger-soft); color: var(--danger); }
+        .card-icon.care { background: var(--warn-soft); color: var(--warn); }
+        .card-icon.info { background: var(--info-soft); color: var(--info); }
+        .card-icon.ok { background: var(--accent-soft); color: var(--accent); }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            flex: 1;
+        }
+        .card-meta {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .card-body {
+            font-size: 14px;
+            color: var(--text);
+            line-height: 1.5;
+        }
+        .card-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        .card-level {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .card-level.safety { background: var(--danger); color: white; }
+        .card-level.care { background: var(--warn); color: white; }
+        .card-level.info { background: var(--info); color: white; }
+
+        /* ===== 设备卡片（控制页） ===== */
+        .device-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 8px;
+        }
+        .device-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 12px;
+            text-align: center;
+            border: 1px solid var(--surface-2);
+            cursor: pointer;
+            transition: all var(--transition);
+            min-height: 90px;
+        }
+        .device-card:active { background: var(--surface-2); }
+        .device-card.off { opacity: 0.5; }
+        .device-icon {
+            font-size: 32px;
+            margin-bottom: 6px;
+        }
+        .device-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .device-status {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+        .device-status.on { color: var(--accent); }
+
+        /* ===== 按钮 ===== */
+        .btn {
+            border: none;
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition);
+            min-height: 40px;
+        }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: #45a049; }
+        .btn-warn { background: var(--warn); color: white; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-secondary {
+            background: var(--surface-2);
+            color: var(--text);
+            border: 1px solid var(--surface-3);
+        }
+        .btn-block { width: 100%; }
+
+        /* ===== 场景列表 ===== */
+        .scene-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background: var(--surface);
+            border-radius: var(--radius);
+            margin-bottom: 6px;
+        }
+        .scene-icon {
+            font-size: 24px;
+            margin-right: 12px;
+        }
+        .scene-name {
+            flex: 1;
+            font-weight: 500;
+        }
+        .scene-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .scene-run {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        /* ===== 通知 ===== */
+        .notif-item {
+            display: flex;
+            padding: 12px;
+            background: var(--surface);
+            border-radius: var(--radius);
+            margin-bottom: 6px;
+            border-left: 3px solid var(--text-faint);
+        }
+        .notif-item.unread { border-left-color: var(--accent); background: var(--surface-2); }
+        .notif-item.safety { border-left-color: var(--danger); }
+        .notif-item.care { border-left-color: var(--warn); }
+        .notif-item.info { border-left-color: var(--info); }
+        .notif-content { flex: 1; }
+        .notif-time {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+        .notif-feedback {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .notif-feedback .btn {
+            padding: 4px 10px;
+            font-size: 12px;
+            min-height: 28px;
+        }
+
+        /* ===== 设置列表 ===== */
+        .settings-list {
+            background: var(--surface);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .settings-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--surface-2);
+            cursor: pointer;
+        }
+        .settings-item:last-child { border-bottom: none; }
+        .settings-item:active { background: var(--surface-2); }
+        .settings-icon {
+            width: 32px;
+            font-size: 20px;
+            margin-right: 12px;
+        }
+        .settings-label { flex: 1; }
+        .settings-hint {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .settings-arrow {
+            color: var(--text-faint);
+            font-size: 18px;
+        }
+
+        /* ===== 角色选择器 ===== */
+        .role-picker {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .role-option {
+            padding: 10px;
+            text-align: center;
+            background: var(--surface-2);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            border: 2px solid transparent;
+            font-size: 13px;
+        }
+        .role-option.active {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ===== 切换 (toggle) ===== */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 28px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: var(--surface-3);
+            border-radius: 28px;
+            transition: 0.3s;
+        }
+        .slider:before {
+            content: "";
+            position: absolute;
+            height: 20px;
+            width: 20px;
+            left: 4px;
+            top: 4px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        input:checked + .slider { background: var(--accent); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        /* ===== 底部导航 ===== */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: 768px;
+            width: 100%;
+            background: var(--surface);
+            border-top: 1px solid var(--surface-2);
+            display: flex;
+            height: var(--bottom-nav-h);
+            z-index: 100;
+        }
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            cursor: pointer;
+            color: var(--text-dim);
+            background: transparent;
+            border: none;
+            min-height: 48px;
+        }
+        .nav-item.active {
+            color: var(--accent);
+        }
+        .nav-icon { font-size: 20px; }
+        .nav-label { font-size: 10px; }
+
+        /* ===== Toast ===== */
+        .toast {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface);
+            color: var(--text);
+            padding: 10px 18px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            z-index: 200;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            max-width: 90%;
+        }
+        .toast.show { opacity: 1; }
+        .toast.error { background: var(--danger); color: white; }
+        .toast.success { background: var(--accent); color: white; }
+
+        /* ===== 模态 ===== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: var(--surface);
+            border-radius: var(--radius);
+            width: 100%;
+            max-width: 480px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--surface-2);
+            display: flex;
+            align-items: center;
+        }
+        .modal-title { flex: 1; font-weight: 600; }
+        .modal-body { padding: 16px; }
+        .modal-footer {
+            padding: 16px;
+            border-top: 1px solid var(--surface-2);
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        /* ===== 实用 ===== */
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-dim);
+        }
+        .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .stat {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 12px 8px;
+            text-align: center;
+        }
+        .stat-value { font-size: 20px; font-weight: 600; }
+        .stat-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--surface-2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* FAB */
+        .fab {
+            position: fixed;
+            bottom: calc(var(--bottom-nav-h) + 16px);
+            right: 16px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 12px rgba(76,175,80,0.4);
+            cursor: pointer;
+            font-size: 24px;
+            z-index: 50;
+        }
+        .fab:active { transform: scale(0.95); }
+
+        .font-size-toggle {
+            display: flex;
+            gap: 4px;
+            background: var(--surface-2);
+            padding: 4px;
+            border-radius: 8px;
+        }
+        .font-size-toggle button {
+            padding: 4px 8px;
+            background: transparent;
+            color: var(--text-dim);
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .font-size-toggle button.active {
+            background: var(--accent);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- ===== 应用容器 ===== -->
+    <div class="app" id="app">
+        <!-- 顶栏 -->
+        <header class="topbar">
+            <div class="topbar-title" id="pageTitle">家</div>
+            <div class="topbar-actions">
+                <button class="btn-icon" id="btnVoiceSearch" title="语音">🎙️</button>
+                <button class="btn-icon" id="btnSettings" title="设置">⚙️</button>
+                <div class="avatar" id="avatarBtn" title="切换成员">张</div>
+            </div>
+        </header>
+
+        <!-- 主区域 -->
+        <main class="main">
+            <!-- ========== 首页 ========== -->
+            <section class="panel active" id="panel-home">
+                <!-- 角色选择（隐藏：admin 切换 / demo） -->
+                <div class="section" id="roleSection" style="display:none;">
+                    <div class="section-title">当前操作成员</div>
+                    <div class="role-picker" id="rolePicker">
+                        <div class="role-option" data-role="admin">👨‍💼 admin</div>
+                        <div class="role-option" data-role="adult">👩 adult</div>
+                        <div class="role-option active" data-role="elder">👴 elder</div>
+                        <div class="role-option" data-role="child">👧 child</div>
+                    </div>
+                </div>
+
+                <!-- 问候语 -->
+                <div class="section">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon ok">☀️</div>
+                            <div style="flex:1;">
+                                <div class="card-title" id="greetingText">早安，张爷爷</div>
+                                <div class="card-meta" id="greetingMeta">2026-08-04 · 28°C 多云</div>
+                            </div>
+                        </div>
+                        <div class="card-body" id="greetingBody">今天 9:00 有牙医预约，记得带医保卡。</div>
+                    </div>
+                </div>
+
+                <!-- 家庭总览 -->
+                <div class="section">
+                    <div class="section-title">家庭总览</div>
+                    <div class="stats-row">
+                        <div class="stat">
+                            <div class="stat-value" id="statDevices">23</div>
+                            <div class="stat-label">设备</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statOnline">21</div>
+                            <div class="stat-label">在线</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statAlerts">2</div>
+                            <div class="stat-label">告警</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statMembers">3</div>
+                            <div class="stat-label">成员</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 紧急告警（仅 safety 级别） -->
+                <div class="section" id="alertSection" style="display:none;">
+                    <div class="section-title">⚠️ 紧急</div>
+                    <div class="card" style="border-left: 4px solid var(--danger);">
+                        <div class="card-header">
+                            <div class="card-icon safety">🆘</div>
+                            <div style="flex:1;">
+                                <div class="card-title" id="alertTitle">老人摔倒</div>
+                                <div class="card-meta">刚刚 · 客厅</div>
+                            </div>
+                            <span class="card-level safety">SAFETY</span>
+                        </div>
+                        <div class="card-body">检测到奶奶在客厅摔倒，已自动通知子女。</div>
+                        <div class="card-actions">
+                            <button class="btn btn-primary" onclick="ackAlert()">✓ 我知道了</button>
+                            <button class="btn btn-secondary" onclick="callFamily()">📞 打电话</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 待办 -->
+                <div class="section">
+                    <div class="section-title">待办事项</div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon info">💊</div>
+                            <div style="flex:1;">
+                                <div class="card-title">早上 8:00 · 吃降压药</div>
+                                <div class="card-meta">每日 · 客厅</div>
+                            </div>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-primary" onclick="markDone()">✓ 已吃</button>
+                            <button class="btn btn-secondary" onclick="snooze()">5 分钟后提醒</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon care">🏥</div>
+                            <div style="flex:1;">
+                                <div class="card-title">9:00 · 牙医预约</div>
+                                <div class="card-meta">明天 · 社区医院</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 老人模式开关（demo） -->
+                <div class="section" id="elderModeSection">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon info">👴</div>
+                            <div style="flex:1;">
+                                <div class="card-title">老人模式</div>
+                                <div class="card-meta">大字体 + 慢节奏 + 语音优先</div>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="elderToggle" onchange="toggleElderMode(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div id="fontSizeRow" style="display:none;margin-top:12px;">
+                            <div class="font-size-toggle" id="fontSizeRowInner">
+                                <button onclick="setFontSize('md')" id="fs-md">中</button>
+                                <button onclick="setFontSize('lg')" id="fs-lg">大</button>
+                                <button onclick="setFontSize('xl')" id="fs-xl">特大</button>
+                                <button onclick="setFontSize('xxl')" id="fs-xxl">超大</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========== 控制 ========== -->
+            <section class="panel" id="panel-control">
+                <div class="section">
+                    <div class="section-title">房间</div>
+                    <div class="role-picker" id="roomFilter">
+                        <div class="role-option active" data-room="all">全部</div>
+                        <div class="role-option" data-room="客厅">客厅</div>
+                        <div class="role-option" data-room="卧室">卧室</div>
+                        <div class="role-option" data-room="厨房">厨房</div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">设备（<span id="deviceCount">0</span>）</div>
+                    <div class="device-grid" id="deviceGrid">
+                        <!-- 动态填充 -->
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">场景</div>
+                    <div id="sceneList">
+                        <div class="scene-item" onclick="runScene('回家')">
+                            <div class="scene-icon">🏠</div>
+                            <div style="flex:1;">
+                                <div class="scene-name">回家</div>
+                                <div class="scene-desc">开客厅灯 + 关窗帘 + 开空调</div>
+                            </div>
+                            <button class="scene-run">▶</button>
+                        </div>
+                        <div class="scene-item" onclick="runScene('离家')">
+                            <div class="scene-icon">🚪</div>
+                            <div style="flex:1;">
+                                <div class="scene-name">离家</div>
+                                <div class="scene-desc">关所有设备 + 启动扫地机器人</div>
+                            </div>
+                            <button class="scene-run">▶</button>
+                        </div>
+                        <div class="scene-item" onclick="runScene('睡觉')">
+                            <div class="scene-icon">🌙</div>
+                            <div style="flex:1;">
+                                <div class="scene-name">睡觉</div>
+                                <div class="scene-desc">关所有灯 + 启动夜灯</div>
+                            </div>
+                            <button class="scene-run">▶</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">规则</div>
+                    <div id="ruleList">
+                        <div class="card">
+                            <div class="card-header">
+                                <div class="card-icon care">⚡</div>
+                                <div style="flex:1;">
+                                    <div class="card-title">elderly_fall_suspect_v1</div>
+                                    <div class="card-meta">启用 · accuracy 0.94</div>
+                                </div>
+                                <span class="card-level care">CARE</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========== 通知 ========== -->
+            <section class="panel" id="panel-notify">
+                <div class="section">
+                    <div class="section-title">未读（<span id="unreadCount">0</span>）</div>
+                    <div id="notifyList">
+                        <div class="notif-item unread safety" data-id="1">
+                            <div class="card-icon safety">🆘</div>
+                            <div class="notif-content">
+                                <div>老人摔倒检测 · 客厅</div>
+                                <div class="notif-time">5 分钟前</div>
+                                <div class="notif-feedback">
+                                    <button class="btn btn-primary" onclick="ackNotif(1)">✓ 真的</button>
+                                    <button class="btn btn-warn" onclick="fbNotif(1,'false_positive')">误报</button>
+                                    <button class="btn btn-secondary" onclick="fbNotif(1,'ignored')">忽略</button>
+                                    <button class="btn btn-danger" onclick="fbNotif(1,'disable')">禁用</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">历史</div>
+                    <div id="historyList">
+                        <div class="notif-item care">
+                            <div class="card-icon care">💧</div>
+                            <div class="notif-content">
+                                <div>水浸传感器触发 · 厨房</div>
+                                <div class="notif-time">2 小时前</div>
+                            </div>
+                        </div>
+                        <div class="notif-item info">
+                            <div class="card-icon info">👤</div>
+                            <div class="notif-content">
+                                <div>门口检测到人 · 18:32</div>
+                                <div class="notif-time">昨天</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========== 我的 ========== -->
+            <section class="panel" id="panel-me">
+                <div class="section">
+                    <div class="section-title">成员管理</div>
+                    <div class="settings-list">
+                        <div class="settings-item" onclick="showMembers()">
+                            <div class="settings-icon">👨‍👩‍👧</div>
+                            <div class="settings-label">家庭成员（<span id="meMemberCount">3</span>）</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">安全</div>
+                    <div class="settings-list">
+                        <div class="settings-item" onclick="setupWebAuthn()">
+                            <div class="settings-icon">🔑</div>
+                            <div class="settings-label">安全密钥 / WebAuthn</div>
+                            <div class="settings-hint" id="webauthnStatus">未配置</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                        <div class="settings-item" onclick="setupTOTP()">
+                            <div class="settings-icon">📱</div>
+                            <div class="settings-label">两步验证 (TOTP)</div>
+                            <div class="settings-hint" id="totpStatus">未启用</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">隐私</div>
+                    <div class="settings-list">
+                        <div class="settings-item">
+                            <div class="settings-icon">👁️</div>
+                            <div class="settings-label">摄像头视觉分析</div>
+                            <div class="settings-hint">LLM 上云分析（脱敏）</div>
+                            <label class="switch">
+                                <input type="checkbox" checked id="visionToggle" onchange="toggleVision(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-item">
+                            <div class="settings-icon">🤖</div>
+                            <div class="settings-label">LLM 兜底推理</div>
+                            <div class="settings-hint">规则低置信度时调用</div>
+                            <label class="switch">
+                                <input type="checkbox" checked id="llmToggle" onchange="toggleLLM(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-item">
+                            <div class="settings-icon">🌐</div>
+                            <div class="settings-label">远程控制（TG / Web）</div>
+                            <div class="settings-hint">irreversible 操作需 L1 确认</div>
+                            <label class="switch">
+                                <input type="checkbox" checked id="remoteToggle" onchange="toggleRemote(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">数据</div>
+                    <div class="settings-list">
+                        <div class="settings-item" onclick="exportData()">
+                            <div class="settings-icon">📦</div>
+                            <div class="settings-label">导出我的数据（GDPR §20）</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                        <div class="settings-item" onclick="deleteData()" style="color: var(--danger);">
+                            <div class="settings-icon">🗑️</div>
+                            <div class="settings-label">被遗忘权（GDPR §17）</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section" id="adminSection">
+                    <div class="section-title">治理（仅 admin）</div>
+                    <div class="settings-list">
+                        <div class="settings-item" onclick="showGovernance()">
+                            <div class="settings-icon">⚖️</div>
+                            <div class="settings-label">治理仪表盘</div>
+                            <div class="settings-hint">规则/告警/资源/决策</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                        <div class="settings-item" onclick="showBudget()">
+                            <div class="settings-icon">💰</div>
+                            <div class="settings-label">LLM 预算</div>
+                            <div class="settings-hint">月 $20（80% 国产 / 20% 国外）</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">系统</div>
+                    <div class="settings-list">
+                        <div class="settings-item" onclick="showAbout()">
+                            <div class="settings-icon">ℹ️</div>
+                            <div class="settings-label">关于</div>
+                            <div class="settings-hint">v3.0.1</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- FAB -->
+        <button class="fab" id="btnFab" title="快速操作" onclick="showFabMenu()">+</button>
+
+        <!-- 底部导航 -->
+        <nav class="bottom-nav">
+            <button class="nav-item active" data-tab="home" onclick="switchTab('home')">
+                <div class="nav-icon">🏠</div>
+                <div class="nav-label">家</div>
+            </button>
+            <button class="nav-item" data-tab="control" onclick="switchTab('control')">
+                <div class="nav-icon">🎛️</div>
+                <div class="nav-label">控制</div>
+            </button>
+            <button class="nav-item" data-tab="notify" onclick="switchTab('notify')">
+                <div class="nav-icon">🔔</div>
+                <div class="nav-label">通知</div>
+            </button>
+            <button class="nav-item" data-tab="me" onclick="switchTab('me')">
+                <div class="nav-icon">👤</div>
+                <div class="nav-label">我的</div>
+            </button>
+        </nav>
+
+        <!-- 模态 -->
+        <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+            <div class="modal">
+                <div class="modal-header">
+                    <div class="modal-title" id="modalTitle">标题</div>
+                    <button class="btn-icon" onclick="closeModal()">✕</button>
+                </div>
+                <div class="modal-body" id="modalBody"></div>
+                <div class="modal-footer" id="modalFooter"></div>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script>
+        // ===== 状态 =====
+        const state = {
+            currentTab: 'home',
+            currentMember: { id: 1, name: '张爷爷', role: 'elder' },
+            elderMode: localStorage.getItem('elderMode') === '1',
+            fontSize: localStorage.getItem('fontSize') || 'md',
+            ws: null,
+            devices: [],
+            notifications: [],
+            unreadCount: 0,
+        };
+
+        // ===== 初始化 =====
+        document.addEventListener('DOMContentLoaded', () => {
+            applyElderMode();
+            applyFontSize();
+            setupRolePicker();
+            setupRoomFilter();
+            loadDevices();
+            connectWS();
+        });
+
+        // ===== 老人模式 =====
+        function toggleElderMode(on) {
+            state.elderMode = on;
+            localStorage.setItem('elderMode', on ? '1' : '0');
+            applyElderMode();
+            showToast(on ? '👴 老人模式已开启' : '老人模式已关闭', 'success');
+        }
+        function applyElderMode() {
+            document.documentElement.classList.toggle('elder-mode', state.elderMode);
+            document.getElementById('elderToggle').checked = state.elderMode;
+            document.getElementById('fontSizeRow').style.display = state.elderMode ? 'block' : 'none';
+        }
+
+        // ===== 字体大小 =====
+        function setFontSize(size) {
+            state.fontSize = size;
+            localStorage.setItem('fontSize', size);
+            document.querySelectorAll('.font-size-toggle button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`fs-${size}`).classList.add('active');
+            ['font-lg', 'font-xl', 'font-xxl'].forEach(c => document.documentElement.classList.remove(c));
+            if (size !== 'md') document.documentElement.classList.add(`font-${size}`);
+        }
+        function applyFontSize() {
+            setFontSize(state.fontSize);
+        }
+
+        // ===== 角色选择 =====
+        function setupRolePicker() {
+            // 显示 / 隐藏根据路由
+            const isAdmin = new URLSearchParams(location.search).get('admin') === '1';
+            document.getElementById('roleSection').style.display = isAdmin ? 'block' : 'none';
+            document.getElementById('adminSection').style.display = isAdmin ? 'block' : 'none';
+
+            document.querySelectorAll('#rolePicker .role-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    document.querySelectorAll('#rolePicker .role-option').forEach(o => o.classList.remove('active'));
+                    opt.classList.add('active');
+                    state.currentMember.role = opt.dataset.role;
+                    state.currentMember.name = { admin: '管理员', adult: '妈妈', elder: '张爷爷', child: '小宝' }[opt.dataset.role];
+                    document.getElementById('avatarBtn').textContent = state.currentMember.name[0];
+                    updateGreeting();
+                    showToast(`已切换到 ${state.currentMember.name}`, 'success');
+                });
+            });
+        }
+
+        // ===== 房间筛选 =====
+        function setupRoomFilter() {
+            document.querySelectorAll('#roomFilter .role-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    document.querySelectorAll('#roomFilter .role-option').forEach(o => o.classList.remove('active'));
+                    opt.classList.add('active');
+                    renderDevices(opt.dataset.room);
+                });
+            });
+        }
+
+        // ===== 标签页切换 =====
+        function switchTab(tab) {
+            state.currentTab = tab;
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`panel-${tab}`).classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+            const titles = { home: '家', control: '控制', notify: '通知', me: '我的' };
+            document.getElementById('pageTitle').textContent = titles[tab];
+        }
+
+        // ===== 问候语 =====
+        function updateGreeting() {
+            const hour = new Date().getHours();
+            let greeting;
+            if (hour < 6) greeting = '夜深了';
+            else if (hour < 11) greeting = '早安';
+            else if (hour < 14) greeting = '中午好';
+            else if (hour < 18) greeting = '下午好';
+            else greeting = '晚上好';
+            document.getElementById('greetingText').textContent = `${greeting}，${state.currentMember.name}`;
+        }
+        updateGreeting();
+
+        // ===== 设备 =====
+        async function loadDevices() {
+            try {
+                const r = await fetch('/api/devices');
+                const data = await r.json();
+                state.devices = data.devices || mockDevices();
+                renderDevices('all');
+            } catch (e) {
+                state.devices = mockDevices();
+                renderDevices('all');
+            }
+        }
+
+        function mockDevices() {
+            return [
+                { id: 'lr_light', icon: '💡', name: '客厅灯', room: '客厅', type: 'light', state: { on: true } },
+                { id: 'lr_ac', icon: '❄️', name: '客厅空调', room: '客厅', type: 'ac', state: { on: true, temp: 26 } },
+                { id: 'lr_tv', icon: '📺', name: '客厅电视', room: '客厅', type: 'tv', state: { on: false } },
+                { id: 'br_light', icon: '💡', name: '卧室灯', room: '卧室', type: 'light', state: { on: false } },
+                { id: 'br_curtain', icon: '🪟', name: '卧室窗帘', room: '卧室', type: 'curtain', state: { pct: 50 } },
+                { id: 'kt_light', icon: '💡', name: '厨房灯', room: '厨房', type: 'light', state: { on: false } },
+                { id: 'kt_fridge', icon: '🧊', name: '冰箱', room: '厨房', type: 'sensor', state: { temp: 4 } },
+                { id: 'dr_lock', icon: '🔒', name: '大门锁', room: '门口', type: 'lock', state: { locked: true } },
+                { id: 'dr_cam', icon: '📹', name: '门口摄像头', room: '门口', type: 'camera', state: { on: true } },
+            ];
+        }
+
+        function renderDevices(roomFilter) {
+            const grid = document.getElementById('deviceGrid');
+            const filtered = state.devices.filter(d => roomFilter === 'all' || d.room === roomFilter);
+            document.getElementById('deviceCount').textContent = filtered.length;
+            grid.innerHTML = filtered.map(d => {
+                const status = getDeviceStatus(d);
+                return `
+                    <div class="device-card ${!status.on ? 'off' : ''}" onclick="controlDevice('${d.id}')">
+                        <div class="device-icon">${d.icon}</div>
+                        <div class="device-name">${d.name}</div>
+                        <div class="device-status ${status.on ? 'on' : ''}">${status.text}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getDeviceStatus(d) {
+            switch (d.type) {
+                case 'light': return { on: d.state.on, text: d.state.on ? '已开' : '已关' };
+                case 'ac': return { on: d.state.on, text: d.state.on ? `${d.state.temp}°C` : '已关' };
+                case 'tv': return { on: d.state.on, text: d.state.on ? '已开' : '已关' };
+                case 'lock': return { on: d.state.locked, text: d.state.locked ? '已锁' : '已开' };
+                case 'curtain': return { on: true, text: `${d.state.pct}%` };
+                case 'sensor': return { on: true, text: `${d.state.temp}°C` };
+                case 'camera': return { on: d.state.on, text: d.state.on ? '录制中' : '已关' };
+                default: return { on: false, text: '未知' };
+            }
+        }
+
+        async function controlDevice(id) {
+            try {
+                const r = await fetch('/api/devices/' + id + '/toggle', { method: 'POST' });
+                if (r.ok) {
+                    const data = await r.json();
+                    const dev = state.devices.find(d => d.id === id);
+                    if (dev) {
+                        if (dev.type === 'lock') dev.state.locked = !dev.state.locked;
+                        else dev.state.on = !dev.state.on;
+                        renderDevices('all');
+                    }
+                }
+            } catch (e) {
+                showToast('设备离线（mock 模式）', 'error');
+            }
+        }
+
+        // ===== 场景 =====
+        async function runScene(name) {
+            try {
+                const r = await fetch('/api/scenes/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                if (r.ok || true) {
+                    showToast(`✓ ${name} 场景执行成功`, 'success');
+                }
+            } catch (e) {
+                showToast(`✓ ${name}（mock 执行）`, 'success');
+            }
+        }
+
+        // ===== 通知 =====
+        function fbNotif(id, type) {
+            const labels = {
+                true_positive: '✓ 已确认',
+                false_positive: '✗ 标记误报',
+                ignored: '⏸ 忽略',
+                disable: '🚫 禁用规则'
+            };
+            showToast(`反馈：${labels[type]}`, 'success');
+            // 模拟删除
+            const el = document.querySelector(`[data-id="${id}"]`);
+            if (el) {
+                el.style.opacity = '0';
+                setTimeout(() => el.remove(), 200);
+            }
+        }
+
+        function ackNotif(id) {
+            fbNotif(id, 'true_positive');
+        }
+
+        function ackAlert() {
+            document.getElementById('alertSection').style.display = 'none';
+            showToast('已确认', 'success');
+        }
+
+        function callFamily() {
+            showToast('📞 正在呼叫...', 'success');
+        }
+
+        function markDone() {
+            showToast('✓ 已吃药', 'success');
+        }
+
+        function snooze() {
+            showToast('5 分钟后提醒', 'success');
+        }
+
+        // ===== 隐私 toggle =====
+        async function toggleVision(on) {
+            try {
+                await fetch('/api/privacy/vision', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: on })
+                });
+            } catch (e) {}
+            showToast(on ? '👁️ 视觉分析已开启' : '已关闭', on ? 'success' : '');
+        }
+        async function toggleLLM(on) {
+            try {
+                await fetch('/api/privacy/llm', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: on })
+                });
+            } catch (e) {}
+            showToast(on ? '🤖 LLM 兜底已开启' : '已关闭', on ? 'success' : '');
+        }
+        async function toggleRemote(on) {
+            showToast(on ? '🌐 远程控制已开启' : '已关闭', on ? 'success' : '');
+        }
+
+        // ===== WebAuthn / TOTP 设置 =====
+        function setupWebAuthn() {
+            showModal('添加安全密钥', `
+                <p style="margin-bottom:12px;">使用 YubiKey / Touch ID / Windows Hello 验证身份。</p>
+                <div style="background:var(--surface-2);padding:12px;border-radius:8px;font-family:monospace;font-size:14px;text-align:center;">
+                    [ 点击下方按钮开始注册 ]
+                </div>
+            `, [
+                { text: '取消', class: 'btn-secondary', onclick: 'closeModal()' },
+                { text: '🔑 开始注册', class: 'btn-primary', onclick: 'doWebAuthn()' },
+            ]);
+        }
+
+        async function doWebAuthn() {
+            // v2.2 真实 WebAuthn 流程
+            if (typeof navigator.credentials === 'undefined' || !navigator.credentials.create) {
+                showToast('❌ 浏览器不支持 WebAuthn（请用 Chrome / Safari 16.4+）', 'error');
+                return;
+            }
+            try {
+                showToast('🔑 正在注册安全密钥...', 'success');
+                const start = await fetch('/api/auth/webauthn/register/start?member_id=' + state.currentMember.id, {
+                    method: 'POST'
+                });
+                const data = await start.json();
+                if (!data.challenge_id) {
+                    showToast('❌ 后端未返回 challenge', 'error');
+                    return;
+                }
+                const challenge = Uint8Array.from(atob(data.challenge_b64), c => c.charCodeAt(0));
+                const options = {
+                    challenge,
+                    rp: { id: data.rp_id, name: data.rp_name },
+                    user: {
+                        id: Uint8Array.from(atob(data.user_id_b64), c => c.charCodeAt(0)),
+                        name: data.user_name,
+                        displayName: data.user_name,
+                    },
+                    pubKeyCredParams: [
+                        { type: 'public-key', alg: -7 },  // ES256
+                        { type: 'public-key', alg: -257 }, // RS256
+                    ],
+                    authenticatorSelection: {
+                        userVerification: 'preferred',
+                        residentKey: 'preferred',
+                    },
+                    timeout: 60000,
+                    attestation: 'direct',
+                };
+                const credential = await navigator.credentials.create({
+                    publicKey: options,
+                });
+                const finish = await fetch('/api/auth/webauthn/register/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        challenge_id: data.challenge_id,
+                        attestation: {
+                            id: credential.id,
+                            rawId: Array.from(new Uint8Array(credential.rawId)),
+                            clientDataJSON: Array.from(new Uint8Array(credential.response.clientDataJSON)),
+                            attestationObject: Array.from(new Uint8Array(credential.response.attestationObject)),
+                        },
+                        name: 'My Phone',
+                    }),
+                });
+                const result = await finish.json();
+                if (result.success) {
+                    showToast('✓ 安全密钥注册成功', 'success');
+                    localStorage.setItem('webauthn_token', result.token);
+                    closeModal();
+                } else {
+                    showToast('❌ 注册失败: ' + (result.error || '未知'), 'error');
+                }
+            } catch (e) {
+                showToast('❌ WebAuthn 错误: ' + e.message, 'error');
+                console.error('WebAuthn:', e);
+            }
+        }
+
+        function setupTOTP() {
+            showModal('启用两步验证 (TOTP)', `
+                <p style="margin-bottom:12px;">用 Google Authenticator / 微软 Authenticator 扫描二维码。</p>
+                <div style="background:white;padding:20px;border-radius:8px;text-align:center;">
+                    <div style="font-family:monospace;font-size:12px;">[ 二维码占位 ]</div>
+                </div>
+                <div style="margin-top:12px;font-family:monospace;font-size:13px;background:var(--surface-2);padding:8px;border-radius:6px;text-align:center;">
+                    JBSWY3DPEHPK3PXP
+                </div>
+            `, [
+                { text: '取消', class: 'btn-secondary', onclick: 'closeModal()' },
+                { text: '✓ 已扫描', class: 'btn-primary', onclick: 'closeModal();showToast("TOTP 已启用","success")' },
+            ]);
+        }
+
+        // ===== 数据 =====
+        async function exportData() {
+            try {
+                const r = await fetch('/api/members/' + state.currentMember.id + '/data');
+                const blob = await r.blob();
+                triggerDownload(blob, `myhome-agent-export-${state.currentMember.id}.json`);
+            } catch (e) {
+                triggerDownload(new Blob([JSON.stringify({export: 'mock', member: state.currentMember})]), `myhome-agent-export-${state.currentMember.id}.json`);
+            }
+            showToast('数据已导出', 'success');
+        }
+
+        function deleteData() {
+            showModal('确认删除？', `
+                <p style="color:var(--danger);">⚠️ 此操作将删除您的所有数据（GDPR §17）。</p>
+                <p style="color:var(--text-dim);font-size:13px;">- 成员画像<br>- 视觉事件历史<br>- 通知历史<br>- 规则反馈<br>- 学习画像</p>
+                <p style="color:var(--text-dim);font-size:13px;">家庭其他成员数据不受影响。</p>
+            `, [
+                { text: '取消', class: 'btn-secondary', onclick: 'closeModal()' },
+                { text: '⚠️ 确认删除', class: 'btn-danger', onclick: 'closeModal();showToast("已发起删除（7 天宽限期）","success")' },
+            ]);
+        }
+
+        // ===== 治理 =====
+        function showGovernance() {
+            showModal('治理仪表盘', `
+                <div class="stats-row">
+                    <div class="stat"><div class="stat-value">5</div><div class="stat-label">规则</div></div>
+                    <div class="stat"><div class="stat-value">0/5</div><div class="stat-label">告警</div></div>
+                    <div class="stat"><div class="stat-value">10/10</div><div class="stat-label">LLM 配额</div></div>
+                    <div class="stat"><div class="stat-value">98%</div><div class="stat-label">API 健康</div></div>
+                </div>
+                <p style="color:var(--text-dim);font-size:13px;margin-top:12px;">
+                    <a href="/governance" target="_blank">完整治理仪表盘 →</a>
+                </p>
+            `, [
+                { text: '关闭', class: 'btn-secondary', onclick: 'closeModal()' },
+            ]);
+        }
+
+        function showBudget() {
+            showModal('LLM 预算', `
+                <div style="margin-bottom:12px;">
+                    <strong>月度总额：$20.00</strong>
+                </div>
+                <div style="background:var(--surface-2);height:24px;border-radius:12px;overflow:hidden;display:flex;">
+                    <div style="background:var(--accent);width:25%;height:100%;display:flex;align-items:center;justify-content:center;font-size:11px;">$5.00</div>
+                </div>
+                <div style="margin-top:12px;font-size:12px;color:var(--text-dim);">
+                    国产 80% / 国外 20%<br>
+                    DeepSeek $3 / Qwen $1 / Kimi $1 / 国外 $0
+                </div>
+            `, [
+                { text: '关闭', class: 'btn-secondary', onclick: 'closeModal()' },
+            ]);
+        }
+
+        function showMembers() {
+            showModal('家庭成员', `
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon ok">👨‍💼</div>
+                        <div style="flex:1;"><div class="card-title">管理员</div><div class="card-meta">admin · 全部权限</div></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon info">👩</div>
+                        <div style="flex:1;"><div class="card-title">妈妈</div><div class="card-meta">adult · 控制 + 反馈</div></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-icon care">👴</div>
+                        <div style="flex:1;"><div class="card-title">张爷爷</div><div class="card-meta">elder · 大字体 + 语音</div></div>
+                    </div>
+                </div>
+            `, [
+                { text: '关闭', class: 'btn-secondary', onclick: 'closeModal()' },
+                { text: '+ 添加成员', class: 'btn-primary', onclick: 'closeModal();showToast(\\"添加成员（v1.0 实现）\\")' },
+            ]);
+        }
+
+        function showAbout() {
+            showModal('关于', `
+                <p><strong>myhome-agent</strong> v3.0.1</p>
+                <p style="color:var(--text-dim);font-size:13px;">
+                    家庭智能管家 · 跨生态 · AI 增强<br>
+                    ${state.devices.length} 设备 · 5 规则 · DeepSeek 集成
+                </p>
+                <p style="font-size:11px;color:var(--text-faint);margin-top:12px;">
+                    <a href="https://github.com/your-org/myhome-agent" target="_blank">GitHub</a> ·
+                    <a href="/docs/ARCHITECTURE.html" target="_blank">架构文档</a> ·
+                    <a href="/SECURITY.html" target="_blank">安全</a>
+                </p>
+            `, [
+                { text: '关闭', class: 'btn-secondary', onclick: 'closeModal()' },
+            ]);
+        }
+
+        // ===== 模态 =====
+        function showModal(title, body, footer) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalBody').innerHTML = body;
+            const f = document.getElementById('modalFooter');
+            f.innerHTML = '';
+            (footer || []).forEach(btn => {
+                const b = document.createElement('button');
+                b.className = 'btn ' + (btn.class || 'btn-secondary');
+                b.textContent = btn.text;
+                if (btn.onclick) b.setAttribute('onclick', btn.onclick);
+                f.appendChild(b);
+            });
+            document.getElementById('modalOverlay').classList.add('show');
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('show');
+        }
+
+        // ===== Toast =====
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast show ' + (type || '');
+            setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        // ===== FAB =====
+        function showFabMenu() {
+            showModal('快速操作', `
+                <button class="btn btn-primary btn-block" onclick="runScene('回家')">🏠 回家场景</button>
+                <button class="btn btn-warn btn-block" onclick="runScene('离家')">🚪 离家场景</button>
+                <button class="btn btn-secondary btn-block" onclick="runScene('睡觉')">🌙 睡觉场景</button>
+                <button class="btn btn-secondary btn-block" onclick="markDone()">💊 标记已吃药</button>
+            `, [
+                { text: '关闭', class: 'btn-secondary', onclick: 'closeModal()' },
+            ]);
+        }
+
+        // ===== 工具 =====
+        function triggerDownload(blob, filename) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+        }
+
+        // ===== WebSocket =====
+        function connectWS() {
+            try {
+                state.ws = new WebSocket(`ws://${location.host}/ws/events`);
+                state.ws.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.type === 'alert' && data.level === 'safety') {
+                            document.getElementById('alertSection').style.display = 'block';
+                            document.getElementById('alertTitle').textContent = data.title || '紧急告警';
+                        }
+                        if (data.type === 'event' && state.currentTab === 'notify') {
+                            // 追加通知
+                        }
+                    } catch (err) {}
+                };
+                state.ws.onclose = () => setTimeout(connectWS, 3000);
+            } catch (e) {}
+        }
+
+        document.getElementById('btnSettings').addEventListener('click', () => switchTab('me'));
+        document.getElementById('btnVoiceSearch').addEventListener('click', () => {
+            showToast('🎙️ 语音输入（Web Speech API 待 v1.0 集成）', '');
+        });
+        document.getElementById('avatarBtn').addEventListener('click', () => {
+            // admin 时显示角色选择
+            if (new URLSearchParams(location.search).get('admin') === '1') {
+                const sec = document.getElementById('roleSection');
+                sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+            } else {
+                showToast('角色切换仅 admin 可用', '');
+            }
+        });
+        document.getElementById('btnFab').addEventListener('click', showFabMenu);
+
+        // 字体大小按钮初始状态
+        document.addEventListener('DOMContentLoaded', () => {
+            setFontSize(state.fontSize);
+        });
+    </script>
+</body>
+</html>

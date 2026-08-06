@@ -1,0 +1,46 @@
+# MiHome Agent 配置
+
+collect:
+  # 本地 miio 轮询间隔（秒）
+  local_poll_interval: 60
+  # 云端设备清单同步间隔（秒）
+  cloud_sync_interval: 3600
+
+analytics:
+  # 增量分析间隔（秒）
+  interval: 300
+  # 作息基线学习窗口（天）
+  routine_window_days: 30
+  # 无活动告警阈值（分钟）——超过基线起床时间这么久仍无活动则告警
+  inactivity_grace_minutes: 180
+
+agent:
+  model: claude-opus-5
+  max_tokens: 16000
+  # 会话历史保留轮数
+  history_turns: 30
+
+# 控制确认策略：这些设备类型的控制指令需要用户二次确认
+control_confirm:
+  - lock          # 门锁
+  - gas           # 燃气相关
+  - camera        # 摄像头
+  - curtain_main  # 示例：可自行增删
+
+# 硬规则告警（立即触发，不经过模型评估）
+hard_alerts:
+  - metric: water_leak
+    condition: "value == 1"
+    level: critical
+    message: "检测到水浸！"
+  - metric: gas_leak
+    condition: "value == 1"
+    level: critical
+    message: "检测到燃气泄漏！"
+  - metric: door_open
+    condition: "value == 1 and 1 <= hour <= 5"
+    level: warning
+    message: "深夜时段门被打开"
+
+# 房间列表（用于设备归类，可留空由云端同步自动补全）
+rooms: []

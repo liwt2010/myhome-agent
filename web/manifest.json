@@ -1,0 +1,46 @@
+{
+  "name": "myhome-agent 家庭管家",
+  "short_name": "管家",
+  "description": "家庭智能体：本地优先 + 跨生态 + AI 管家",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#4CAF50",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "聊天",
+      "short_name": "Chat",
+      "url": "/?tab=chat"
+    },
+    {
+      "name": "规则",
+      "short_name": "Rules",
+      "url": "/?tab=rules"
+    },
+    {
+      "name": "治理",
+      "short_name": "Gov",
+      "url": "/?tab=governance"
+    }
+  ],
+  "categories": ["lifestyle", "utilities", "productivity"],
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "prefer_related_applications": false
+}
