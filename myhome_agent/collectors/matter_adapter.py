@@ -28,48 +28,49 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 
-# Matter Device Type IDs（v1.3）
+# Matter Device Type IDs（按 connectedhomeip DeviceTypes.h 校正）
 MATTER_DEVICE_TYPES = {
-    0x0001: "OnOffLight",
-    0x0101: "OnOffLightSwitch",
-    0x0103: "LightSensor",
-    0x0202: "Thermostat",
-    0x0204: "TemperatureSensor",
-    0x0301: "DoorLock",
-    0x0106: "LightSwitch",
-    0x0107: "LightDimmerSwitch",
-    0x0302: "DoorLockController",
-    0x0100: "GenericSwitch",
-    0x0201: "HeatingCoolingUnit",
-    0x0500: "GenericSensor",
-    0x0010: "GenericCamera",
-    0x0042: "WaterLeakDetector",
-    0x0043: "SmokeCoAlarm",
-    0x0051: "AirQualitySensor",
+    0x000A: "DoorLock",
+    0x000B: "DoorLockController",
+    0x000F: "GenericSwitch",
+    0x0011: "Camera",
+    0x0015: "ContactSensor",
+    0x002C: "AirQualitySensor",
+    0x0043: "WaterLeakDetector",
+    0x0076: "SmokeCoAlarm",
+    0x0100: "OnOffLight",
+    0x0101: "DimmableLight",
+    0x0103: "OnOffLightSwitch",
+    0x0104: "DimmerSwitch",
+    0x0106: "LightSensor",
+    0x0107: "OccupancySensor",
+    0x010C: "ColorTemperatureLight",
+    0x010D: "ExtendedColorLight",
+    0x0301: "Thermostat",
+    0x0302: "TemperatureSensor",
+    0x0307: "HumiditySensor",
 }
 
 
-# Matter Cluster IDs（v1.3）
+# Matter Cluster IDs（按 connectedhomeip Clusters.h 校正）
 MATTER_CLUSTERS = {
     0x0003: ("Identify", "r"),
     0x0004: ("Groups", "rw"),
     0x0006: ("OnOff", "rw"),
     0x0008: ("Level", "rw"),
+    0x0101: ("DoorLock", "rw"),
     0x0102: "WindowCovering",
-    0x0104: "ColorControl",
-    0x0200: "Thermostat",
-    0x0201: "TemperatureMeasurement",
-    0x0202: "OccupancySensing",
-    0x0204: "ThermostatUserInterface",
-    0x0206: "TemperatureControl",
-    0x0300: "DoorLock",
-    0x0402: "IlluminanceMeasurement",
-    0x0405: "HumidityMeasurement",
+    0x0201: ("Thermostat", "rw"),
+    0x0204: "ThermostatUserInterfaceConfiguration",
+    0x0300: ("ColorControl", "rw"),
+    0x0400: ("IlluminanceMeasurement", "r"),
+    0x0402: ("TemperatureMeasurement", "r"),
+    0x0405: "RelativeHumidityMeasurement",
     0x0406: "OccupancySensing",
     0x0050: "AirQuality",
     0x0051: "CarbonMonoxideConcentrationMeasurement",
     0x0052: "CarbonDioxideConcentrationMeasurement",
-    0x0098: "SmokeAlarm",
+    0x0076: "SmokeCOAlarm",
     0x0099: "WaterFreezeDetector",
     0x009A: "WaterLeakDetector",
 }
@@ -93,18 +94,18 @@ MATTER_TO_UNIFIED_TYPE = {
 }
 
 
-# Cluster ID → 统一 capability
+# Cluster ID → 统一 capability（ID 已按官方表校正）
 CLUSTER_TO_CAPABILITY = {
     0x0006: "light.toggle",          # OnOff
     0x0008: "light.brightness",      # Level
-    0x0104: "light.color_temp",      # ColorControl
-    0x0200: "ac.target_temp",        # Thermostat
-    0x0201: "sensor.temperature",    # TemperatureMeasurement
-    0x0300: "lock.lock",             # DoorLock
-    0x0402: "sensor.illuminance",    # IlluminanceMeasurement
-    0x0405: "sensor.humidity",       # HumidityMeasurement
+    0x0300: "light.color_temp",      # ColorControl
+    0x0201: "ac.target_temp",        # Thermostat
+    0x0402: "sensor.temperature",    # TemperatureMeasurement
+    0x0101: "lock.lock",             # DoorLock
+    0x0400: "sensor.illuminance",    # IlluminanceMeasurement
+    0x0405: "sensor.humidity",       # RelativeHumidityMeasurement
     0x0050: "sensor.air_quality",    # AirQuality
-    0x0098: "sensor.smoke",          # SmokeAlarm
+    0x0076: "sensor.smoke",          # SmokeCOAlarm
     0x009A: "sensor.water_leak",     # WaterLeakDetector
 }
 
@@ -123,7 +124,6 @@ class MatterAdapter(EcosystemAdapter):
         self.fabric_id = config.get("fabric_id", "")
         self.commissioning_passcode = config.get("passcode", 20202021)
         self.commissioning_discriminator = config.get("discriminator", 3840)
-        self.controller = None
         self.chip_tool_path = config.get("chip_tool_path", "chip-tool")
         self.controller = None
         self._chip_tool = None
@@ -171,6 +171,13 @@ class MatterAdapter(EcosystemAdapter):
 
     def commission(self, setup_passcode: int, device_discriminator: int = 3840) -> bool:
         """v2.1 配网流程（commissioning）"""
+        if self._chip_tool is not None:
+            result = self._chip_tool.commission(
+                setup_passcode=setup_passcode,
+                discriminator=device_discriminator,
+                node_id=self.node_id,
+            )
+            return result.success
         if not self.controller:
             return False
         try:
@@ -188,6 +195,13 @@ class MatterAdapter(EcosystemAdapter):
     # ============================================================
 
     def discover(self) -> list[EcosystemDevice]:
+        if self._chip_tool is not None:
+            result = self._chip_tool.list_nodes()
+            if result.success:
+                logger.info("Matter chip-tool: 已列出 fabric 节点")
+            else:
+                logger.warning("Matter chip-tool list-nodes 失败: %s", result.stderr[:200])
+            return []
         if not self.controller:
             return []
         try:
@@ -254,6 +268,8 @@ class MatterAdapter(EcosystemAdapter):
     # ============================================================
 
     def execute_action(self, device_id: str, action: str, params=None) -> dict:
+        if self._chip_tool is not None:
+            return self._chip_tool_execute(device_id, action, params or {})
         if not self.controller:
             return {"success": False, "message": "Matter controller 未初始化"}
         try:
@@ -306,7 +322,60 @@ class MatterAdapter(EcosystemAdapter):
             }}
         return {}
 
+    def _chip_tool_execute(self, device_id: str, action: str, params: dict) -> dict:
+        """chip-tool 后端执行（统一 adapter 契约）。"""
+        try:
+            node_id, endpoint = self._parse_device_id(device_id)
+        except Exception as e:
+            return {"success": False, "state": None, "message": f"device_id 格式错: {e}"}
+
+        if action == "light.toggle":
+            raw = self._chip_tool.onoff(node_id, endpoint, bool(params.get("on", True)))
+        elif action == "light.brightness":
+            raw = self._chip_tool.level(node_id, endpoint, int(params.get("brightness", 100)))
+        elif action == "light.color_temp":
+            raw = self._chip_tool.color_temperature(node_id, endpoint, int(params.get("color_temp", 300)))
+        elif action == "lock.lock":
+            raw = self._chip_tool.lock_door(node_id, endpoint)
+        elif action == "lock.unlock":
+            raw = self._chip_tool.unlock_door(node_id, endpoint)
+        elif action == "ac.target_temp":
+            raw = self._chip_tool.thermostat_setpoint(node_id, endpoint, float(params.get("target_temp", 22)))
+        else:
+            return {"success": False, "state": None, "message": f"未支持: {action}"}
+        return self._chip_result(raw)
+
+    @staticmethod
+    def _parse_device_id(device_id: str) -> tuple[int, int]:
+        if "/" in device_id:
+            node, ep = device_id.split("/", 1)
+            return int(node), int(ep)
+        return int(device_id), 1
+
+    @staticmethod
+    def _chip_result(raw) -> dict:
+        if hasattr(raw, "success"):
+            ok = bool(raw.success)
+            stdout = getattr(raw, "stdout", "")
+            stderr = getattr(raw, "stderr", "")
+        else:
+            ok = bool(raw.get("success", False))
+            stdout = raw.get("stdout", "")
+            stderr = raw.get("stderr", "")
+        return {
+            "success": ok,
+            "state": {"stdout": stdout, "stderr": stderr},
+            "message": "OK" if ok else "chip-tool 命令失败",
+        }
+
     def get_state(self, device_id: str) -> dict:
+        if self._chip_tool is not None:
+            try:
+                node_id, endpoint = self._parse_device_id(device_id)
+            except Exception:
+                return {}
+            raw = self._chip_tool.read_attribute(node_id, endpoint, "OnOff", "OnOff")
+            return self._chip_result(raw)
         if not self.controller:
             return {}
         try:
@@ -316,4 +385,4 @@ class MatterAdapter(EcosystemAdapter):
             return {}
 
     def _do_health_check(self) -> bool:
-        return self._healthy and self.controller is not None
+        return self._healthy and (self.controller is not None or self._chip_tool is not None)

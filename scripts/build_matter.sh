@@ -48,10 +48,10 @@ build_docker() {
             git clone --depth 1 ${REPO_URL}
             cd ${PROJECT_NAME}
             git submodule update --init --recursive
-            ./script/bootstrap.sh
-            ./script/build_platform.sh -p ${PLATFORM}
+            ./scripts/bootstrap.sh
+            ./scripts/build.sh
             mkdir -p /work/out
-            cp -r out/${PLATFORM}/* /work/out/
+            find out -name chip-tool -type f -exec cp {} /work/out/ \;
             ls /work/out/
         "
     log_info "Docker 编译完成 → ${OUTPUT_DIR}"
@@ -96,12 +96,13 @@ build_linux() {
     fi
 
     log_info "Bootstrap（拉依赖，5-10 分钟）..."
-    ./script/bootstrap.sh
+    ./scripts/bootstrap.sh
 
     log_info "编译（30-60 分钟）..."
-    ./script/build_platform.sh -p "${PLATFORM}"
+    ./scripts/build.sh
 
-    cp -r "out/${PLATFORM}" "$OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR"
+    find out -name chip-tool -type f -exec cp {} "$OUTPUT_DIR" \;
     log_info "编译完成 → ${OUTPUT_DIR}"
 }
 
@@ -120,9 +121,10 @@ build_macos() {
     fi
     cd "$PROJECT_NAME"
     git submodule update --init --recursive
-    ./script/bootstrap.sh -p darwin
-    ./script/build_platform.sh -p darwin-x64
-    cp -r "out/darwin-x64" "$OUTPUT_DIR"
+    ./scripts/bootstrap.sh
+    ./scripts/build.sh
+    mkdir -p "$OUTPUT_DIR"
+    find out -name chip-tool -type f -exec cp {} "$OUTPUT_DIR" \;
     log_info "编译完成"
 }
 

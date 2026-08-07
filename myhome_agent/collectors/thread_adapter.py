@@ -188,6 +188,16 @@ class ThreadAdapter(EcosystemAdapter):
         )
 
     # ============================================================
+    # 能力查询
+    # ============================================================
+
+    def get_capability(self, device_id: str) -> list[Capability]:
+        for dev in self._devices.values():
+            if dev.ecosystem_id == device_id:
+                return dev.capabilities
+        return []
+
+    # ============================================================
     # CoAP 控制（v2.1.1 真实，v2.1.0 stub）
     # ============================================================
 

@@ -1,168 +1,174 @@
-from __future__ import annotations
-import os
-import sys
-import time
+"""Matter 3 类设备实测（v2.4，2026-08-07 修订）
 
-
-"""Matter 3 类设备实测（v2.4）
-
-3 类设备(OnOff Light / Thermostat / DoorLock)端到端 + commission + 控制 + 读属性 + 性能验证。
+3 类设备(OnOff Light / Thermostat / DoorLock)端到端 + commission + 控制 + 读属性。
+chip-tool 未装或 MATTER_MOCK=1 时使用 FakeChipToolAdapter 完整走一遍命令构造，
+真机就绪后去掉 mock 即为真实联调脚本。
 
 用法：
-    # 1. 编译 chip-tool（scripts/build_matter.sh）
-    # 2. 设备进入配对模式（按设备按钮 10s）
-    # 3. 跑实测
-    python scripts/test_real_matter.py
-
-期望输出：
-    - 3 类设备 commissioning 流程
-    - 控制延迟 < 200ms
-    - 状态读回成功
-    - 优雅降级（chip-tool 未装时）
+    python scripts/test_real_matter.py            # 真机（需 chip-tool）
+    MATTER_MOCK=1 python scripts/test_real_matter.py  # mock 命令构造
 """
+from __future__ import annotations
 
-import json
-from typing import Any
+import os
+import sys
 
 sys.path.insert(0, ".")
 
-_IS_MOCK = __import__('os').getenv('MATTER_MOCK') == '1'
+_IS_MOCK = os.getenv("MATTER_MOCK") == "1"
 
+
+class _FakeChipToolAdapter:
+    """MATTER_MOCK 模式：记录命令、返回成功，用于锁定命令构造。"""
+
+    def __init__(self, *args, **kwargs):
+        self.chip_tool = "fake"
+        self.calls: list[list[str]] = []
+        self.success = True
+        self.stdout = ""
+        self.stderr = ""
+        self.elapsed_ms = 0
+
+    def _run(self, *args):
+        self.calls.append(list(args))
+        return self
+
+    def onoff(self, node_id, endpoint, on):
+        return self._run("onoff", "on" if on else "off", str(node_id), str(endpoint))
+
+    def level(self, node_id, endpoint, level):
+        return self._run("levelcontrol", "move-to-level", str(node_id), str(endpoint), str(level))
+
+    def color_temperature(self, node_id, endpoint, mireds):
+        return self._run(
+            "colorcontrol", "move-to-color-temperature",
+            str(node_id), str(endpoint), str(mireds), "0", "0", "0",
+        )
+
+    def lock_door(self, node_id, endpoint):
+        return self._run("doorlock", "lock-door", str(node_id), str(endpoint))
+
+    def unlock_door(self, node_id, endpoint):
+        return self._run("doorlock", "unlock-door", str(node_id), str(endpoint))
+
+    def thermostat_setpoint(self, node_id, endpoint, target_temp_c, mode="heat"):
+        attr = "occupied-heating-setpoint" if mode == "heat" else "occupied-cooling-setpoint"
+        return self._run(
+            "thermostat", "write", attr,
+            str(int(round(target_temp_c * 100))),
+            str(node_id), str(endpoint),
+        )
+
+    def read_attribute(self, node_id, endpoint, cluster, attribute):
+        return self._run(cluster.lower(), "read", str(node_id), str(endpoint), attribute)
+
+    def commission(self, setup_passcode, discriminator=3840, node_id=None,
+                   thread_dataset_hex=None, timeout=120):
+        args = ["pairing", "ble-thread", str(node_id or 1), str(discriminator), str(setup_passcode)]
+        if thread_dataset_hex:
+            args.append(thread_dataset_hex)
+        return self._run(*args)
+
+    def pair_ble_wifi(self, node_id, ssid, password, setup_passcode,
+                      discriminator=3840, timeout=180):
+        return self._run(
+            "pairing", "ble-wifi",
+            str(node_id), ssid, password, str(discriminator), str(setup_passcode),
+        )
+
+
+def _pick_adapter():
+    from myhome_agent.collectors.chip_tool_wrapper import ChipToolAdapter, is_chip_tool_available
+
+    if _IS_MOCK:
+        print("  ⚠️  MATTER_MOCK=1：使用 FakeChipToolAdapter 验证命令构造")
+        return _FakeChipToolAdapter(), True
+    adapter = ChipToolAdapter()
+    if is_chip_tool_available(adapter.chip_tool):
+        return adapter, False
+    print("  ⚠️  chip-tool 未装：降级为 FakeChipToolAdapter（命令构造验证）")
+    return _FakeChipToolAdapter(), True
+
+
+def _show_calls(adapter):
+    for call in getattr(adapter, "calls", []):
+        print(f"     chip-tool {' '.join(call)}")
 
 
 def test_onoff_light():
-    """v2.4 OnOff Light 实测"""
     print("=" * 70)
     print("  v2.4 Matter OnOff Light 实测")
     print("=" * 70)
-    from myhome_agent.collectors.chip_tool_wrapper import ChipToolAdapter
+    adapter, is_mock = _pick_adapter()
 
-    adapter = ChipToolAdapter()
-    print(f"  chip-tool 状态: {'available' if adapter.chip_tool else 'fallback (stub)'}")
+    print("\n  1. Commissioning（跳过真机配网）")
+    print("     chip-tool pairing ble-thread <node-id> <discriminator> <passcode>")
 
-    print(f"\n  1. 设备进入配对模式（按 10s）")
-    print(f"     chip-tool pairing ble-thread 1 20202021 3840")
-
-    if _IS_MOCK or not adapter.chip_tool:
-        print(f"  ⚠️  stub 模式（MATTER_MOCK 或 chip-tool 未装）\n")
-        return
-    if not adapter.chip_tool:  # keep as safety net
-        print(f"\n  2. ✅ 编译后重跑 + 真实 commissioning")
-        print(f"  ⚠️  当前是 stub 模式（chip-tool 未装）")
-        # 模拟
-        print(f"\n  3. 控制验证（mock）：")
-        for cmd in ["on", "off", "toggle"]:
-            print(f"     chip-tool onoff {cmd} 1 1")
-        print(f"\n  4. 性能目标：< 200ms")
-        return
-
-    print(f"\n  2. Commissioning（未指 device 跳过）")
-    print(f"     输入设备 setup passcode：")
-    passcode = "20202021"  # MATTER_MOCK=1 默认
-    result = adapter.commission(int(passcode))
-    print(f"     commission: {result.success} ({result.elapsed_ms}ms)")
-
-    print(f"\n  3. 控制：")
+    print("\n  2. 控制 + 读状态：")
     for cmd, on in [("on", True), ("off", False)]:
         result = adapter.onoff(1, 1, on)
-        print(f"     {cmd}: {result.success} ({result.elapsed_ms}ms)")
-
-    print(f"\n  4. 读状态：")
+        print(f"     {cmd}: success={result.success}")
     result = adapter.read_attribute(1, 1, "OnOff", "OnOff")
-    print(f"     OnOff: {result.stdout[:60]}")
+    print(f"     读 OnOff: success={result.success}")
+
+    if is_mock:
+        _show_calls(adapter)
 
 
 def test_thermostat():
-    """v2.4 Thermostat 实测"""
     print()
     print("=" * 70)
     print("  v2.4 Matter Thermostat 实测")
     print("=" * 70)
-    from myhome_agent.collectors.chip_tool_wrapper import ChipToolAdapter
+    adapter, is_mock = _pick_adapter()
 
-    adapter = ChipToolAdapter()
-
-    print(f"\n  1. 设备：智能恒温器（Aqara / Ecobee）")
-    print(f"     cluster: Thermostat + TemperatureMeasurement")
-    print(f"     capability: 'ac.target_temp' / 'sensor.temperature'")
-
-    if _IS_MOCK or not adapter.chip_tool:
-        print(f"  ⚠️  stub 模式（MATTER_MOCK 或 chip-tool 未装）\n")
-        return
-    if not adapter.chip_tool:  # keep as safety net
-        print(f"\n  2. ⚠️  stub 模式 — 编译 chip-tool 后实测")
-        print(f"     命令：chip-tool thermostat setpoint-raise-lower 1 1 ... 60")
-        return
-
-    print(f"\n  2. 设目标温度 24°C：")
+    print("\n  1. 设目标温度 24°C（写 occupied-heating-setpoint，毫度）")
     result = adapter.thermostat_setpoint(1, 1, 24.0)
-    print(f"     set: {result.success} ({result.elapsed_ms}ms)")
+    print(f"     set: success={result.success}")
 
-    print(f"\n  3. 读当前温度：")
+    print("\n  2. 读当前温度：")
     result = adapter.read_attribute(1, 1, "TemperatureMeasurement", "MeasuredValue")
-    print(f"     temp: {result.stdout[:60]}")
+    print(f"     temp: success={result.success}")
+
+    if is_mock:
+        _show_calls(adapter)
 
 
 def test_door_lock():
-    """v2.4 DoorLock 实测"""
     print()
     print("=" * 70)
     print("  v2.4 Matter DoorLock 实测")
     print("=" * 70)
-    from myhome_agent.collectors.chip_tool_wrapper import ChipToolAdapter
+    adapter, is_mock = _pick_adapter()
 
-    adapter = ChipToolAdapter()
-
-    print(f"\n  1. 设备：智能门锁（Yale / Aqara）")
-    print(f"     cluster: DoorLock")
-    print(f"     capability: 'lock.lock' / 'lock.unlock'")
-
-    print(f"\n  2. ⚠️  Risk policy：安全场景")
-
-    if _IS_MOCK or not adapter.chip_tool:
-        print(f"  ⚠️  stub 模式（MATTER_MOCK 或 chip-tool 未装）\n")
-        return
-    if not adapter.chip_tool:  # keep as safety net
-        print(f"\n  3. stub 模式 — 编译 chip-tool 后实测")
-        print(f"     命令：chip-tool doorlock lock-door 1 1")
-        print(f"     命令：chip-tool doorlock unlock-door 1 1")
-        return
-
-    print(f"\n  4. 上锁：")
+    print("\n  1. 上锁 / 开锁：")
     result = adapter.lock_door(1, 1)
-    print(f"     lock: {result.success} ({result.elapsed_ms}ms)")
+    print(f"     lock: success={result.success}")
+    result = adapter.unlock_door(1, 1)
+    print(f"     unlock: success={result.success}")
 
-    print(f"\n  5. 状态：")
+    print("\n  2. 状态：")
     result = adapter.read_attribute(1, 1, "DoorLock", "LockState")
-    print(f"     state: {result.stdout[:60]}")
+    print(f"     state: success={result.success}")
+
+    if is_mock:
+        _show_calls(adapter)
 
 
 def performance_summary():
-    """v2.4 性能基准确认"""
     print()
     print("=" * 70)
-    print("  v2.4 性能基准")
+    print("  v2.4 性能基准（目标值，需真机实测确认）")
     print("=" * 70)
-    print(f"  目标                     实测")
-    print(f"  -------------------------  ---------")
     print(f"  OnOff 控制延迟            < 200ms")
     print(f"  Thermostat 设温延迟        < 500ms")
     print(f"  DoorLock 上锁延迟          < 1000ms")
     print(f"  状态读回                  < 100ms")
-    print(f"  100 设备并发 (chip-tool)    支持")
-    print(f"  3 类设备组合 (Light+Thermostat+Lock)  完整 multi-admin Fabric")
+    print(f"  100 设备并发 (chip-tool)    待实测")
+    print(f"  3 类设备组合 multi-admin Fabric   待实测")
 
 
 def main():
-    if os.getenv("MATTER_MOCK") == "1":
-        print("=" * 70)
-        print("  v2.4 Matter mock 模式（chip-tool 未装）")
-        print("=" * 70)
-        for fn in [test_onoff_light, test_thermostat, test_door_lock]:
-            fn()
-        performance_summary()
-        return
-
     test_onoff_light()
     test_thermostat()
     test_door_lock()

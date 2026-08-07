@@ -212,7 +212,7 @@ class RealThreadAdapter(EcosystemAdapter):
 
     def get_dataset(self) -> dict:
         if not self.backend or self.backend_type != "ot_ctl":
-            return super().get_dataset()
+            return {}
         return self.backend.get_dataset_active()
 
     def get_dataset_active_b64(self) -> str:

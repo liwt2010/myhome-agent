@@ -24,6 +24,7 @@ dependencies = [
     "webauthn>=2.0.0",           # WebAuthn/FIDO2
     "python-telegram-bot>=21.0", # Telegram 通道
     "phe>=1.5.0",                # Paillier 同态加密
+    "zeroconf>=0.150",           # Matter/Thread mDNS 发现
 ]
 
 [project.optional-dependencies]

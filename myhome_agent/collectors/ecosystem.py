@@ -201,6 +201,15 @@ def create_adapter(ecosystem: str, config: dict) -> EcosystemAdapter:
     elif ecosystem == "hue":
         from .hue_adapter import HueAdapter
         return HueAdapter(config)
+    elif ecosystem == "matter":
+        from .matter_real import RealMatterAdapter
+        return RealMatterAdapter(config)
+    elif ecosystem == "zigbee":
+        from .zigbee_adapter import ZigbeeAdapter
+        return ZigbeeAdapter(config)
+    elif ecosystem == "thread":
+        from .thread_adapter import ThreadAdapter
+        return ThreadAdapter(config)
     elif ecosystem == "homekit":
         from .homekit_adapter import HomeKitAdapter
         return HomeKitAdapter(config)

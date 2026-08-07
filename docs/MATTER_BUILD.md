@@ -19,10 +19,10 @@ cd connectedhomeip
 git submodule update --init --recursive
 
 # 引导（拉依赖）
-./script/bootstrap.sh
+./scripts/bootstrap.sh
 
 # 编译（30-60 分钟）
-./script/build_platform.sh
+./scripts/build.sh
 
 # 安装
 sudo cp out/raspbian-x64/chip-tool /usr/local/bin/
@@ -48,10 +48,10 @@ cd connectedhomeip
 git submodule update --init --recursive
 
 # 重要：用专用 bootstrap（macOS 路径）
-./script/bootstrap.sh -p darwin
+./scripts/bootstrap.sh
 
 # 编译
-./script/build_platform.sh
+./scripts/build.sh
 
 # 安装
 cp out/darwin-x64/chip-tool /usr/local/bin/
@@ -79,7 +79,7 @@ docker run -it --rm \
   -v ${PWD}:/work \
   -w /work \
   ubuntu:22.04 \
-  bash -c "apt update && apt install -y git gcc g++ libssl-dev libdbus-1-dev libglib2.0-dev libavahi-client-dev ninja-build python3-pip && git clone --depth 1 https://github.com/project-chip/connectedhomeip.git && cd connectedhomeip && git submodule update --init --recursive && ./script/bootstrap.sh && ./script/build_platform.sh -p raspberry-x64 && cp out/raspberry-x64/chip-tool /work/"
+  bash -c "apt update && apt install -y git gcc g++ libssl-dev libdbus-1-dev libglib2.0-dev libavahi-client-dev ninja-build python3-pip && git clone --depth 1 https://github.com/project-chip/connectedhomeip.git && cd connectedhomeip && git submodule update --init --recursive && ./scripts/bootstrap.sh && ./scripts/build.sh && find out -name chip-tool -type f -exec cp {} /work/ \;"
 ```
 
 完成大约 1 小时。
@@ -166,8 +166,8 @@ print(result.success, result.stdout[:200])
 
 ## 10. 替代方案（如果编译失败）
 
-- **pre-built Docker image**：`docker pull matterhub/chip-tool:v1.3`
-  - `docker run --rm -it matterhub/chip-tool --version`
+- **pre-built Docker image**：⚠️ `matterhub/chip-tool:v1.3` 是社区非官方镜像，存在供应链风险，不推荐直接使用。
+  - 如需 Docker 编译，请使用仓库内 `scripts/build_matter.sh docker` 从 connectedhomeip 源码构建。
 - **预编译二进制**：见 [official releases](https://github.com/project-chip/connectedhomeip/releases)
 - **完全跳过**：myhome-agent 仍可用 stub 模式（仅 capability 映射，不能真实控制）
 

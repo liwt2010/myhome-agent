@@ -49,3 +49,8 @@ checkpoints/
 *.log
 *.tmp
 *.bak
+
+# 凭据/密钥文件（防误提交）
+ghp_*
+*.pem
+*.key

@@ -229,6 +229,16 @@ class ZigbeeAdapter(EcosystemAdapter):
             return []
 
     # ============================================================
+    # 能力查询
+    # ============================================================
+
+    def get_capability(self, device_id: str) -> list[Capability]:
+        for dev in self._devices.values():
+            if dev.ecosystem_id == device_id:
+                return dev.capabilities
+        return []
+
+    # ============================================================
     # 控制
     # ============================================================
 

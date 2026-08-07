@@ -167,13 +167,14 @@ class ChipToolAdapter:
         self,
         node_id: int, endpoint: int,
         target_temp_c: float,
+        mode: str = "heat",
     ) -> ChipToolResult:
-        """Thermostat 集群：设目标温度"""
+        """Thermostat 集群：写绝对目标温度（毫度），避免相对调温语义错误"""
+        attribute = "occupied-heating-setpoint" if mode == "heat" else "occupied-cooling-setpoint"
         return self._run(
-            "thermostat", "setpoint-raise-lower",
+            "thermostat", "write", attribute,
+            str(int(round(target_temp_c * 100))),
             str(node_id), str(endpoint),
-            "0", "0", "0", "0", "0", "0", "0",
-            str(int((target_temp_c - 22) * 10)),
         )
 
     def read_attribute(
@@ -205,14 +206,34 @@ class ChipToolAdapter:
 
     def commission(
         self, setup_passcode: int, discriminator: int = 3840,
+        node_id: int | None = None, thread_dataset_hex: str | None = None,
         timeout: int = 120,
     ) -> ChipToolResult:
-        """Matter commissioning（BLE）"""
-        return self._run(
+        """Matter commissioning（BLE + Thread；第一个位置参数是 node-id）"""
+        args = [
             "pairing", "ble-thread",
-            str(self.fabric_id),
-            str(setup_passcode),
+            str(node_id if node_id is not None else self.node_id),
             str(discriminator),
+            str(setup_passcode),
+        ]
+        if thread_dataset_hex:
+            args.append(thread_dataset_hex)
+        return self._run(
+            *args,
+            timeout=timeout,
+        )
+
+    def pair_ble_wifi(
+        self,
+        node_id: int, ssid: str, password: str,
+        setup_passcode: int, discriminator: int = 3840,
+        timeout: int = 180,
+    ) -> ChipToolResult:
+        """Matter commissioning（BLE + Wi-Fi，适配 WiFi Matter 设备）"""
+        return self._run(
+            "pairing", "ble-wifi",
+            str(node_id), ssid, password,
+            str(discriminator), str(setup_passcode),
             timeout=timeout,
         )
 
