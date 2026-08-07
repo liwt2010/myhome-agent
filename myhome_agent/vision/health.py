@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -79,23 +80,24 @@ class CameraHealthMonitor:
     def _notify_offline(self, camera_id: str, last_seen_at: int) -> None:
         """通知管理员摄像头离线"""
         logger.warning(f"[health] 摄像头离线: {camera_id} last_seen={last_seen_at}")
-        # 写 audit
-        self.store._conn().execute(
-            """INSERT INTO events (kind, household_id, detail, ts)
-               VALUES (?, 1, ?, strftime('%s', 'now'))""",
-            ("camera_offline", f'{{"camera_id": "{camera_id}", "last_seen_at": {last_seen_at}}}'),
-        )
-        self.store._conn().commit()
+        detail = json.dumps({"camera_id": camera_id, "last_seen_at": last_seen_at}, ensure_ascii=False)
+        with self.store._conn() as c:
+            c.execute(
+                """INSERT INTO events (kind, detail, ts)
+                   VALUES (?, ?, datetime('now','localtime'))""",
+                ("camera_offline", detail),
+            )
 
     def _notify_recovered(self, camera_id: str) -> None:
         """通知摄像头恢复"""
         logger.info(f"[health] 摄像头恢复: {camera_id}")
-        self.store._conn().execute(
-            """INSERT INTO events (kind, household_id, detail, ts)
-               VALUES (?, 1, ?, strftime('%s', 'now'))""",
-            ("camera_online", f'{{"camera_id": "{camera_id}"}}'),
-        )
-        self.store._conn().commit()
+        detail = json.dumps({"camera_id": camera_id}, ensure_ascii=False)
+        with self.store._conn() as c:
+            c.execute(
+                """INSERT INTO events (kind, detail, ts)
+                   VALUES (?, ?, datetime('now','localtime'))""",
+                ("camera_online", detail),
+            )
 
     def run_forever(self) -> None:
         """永久循环（后台线程）"""

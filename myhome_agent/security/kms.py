@@ -26,6 +26,30 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _update_env_value(name: str, value: str) -> None:
+    """更新项目根 .env 中的单个键值并同步到 os.environ。"""
+    from ..config import ROOT
+
+    env_path = ROOT / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+    except OSError:
+        lines = []
+    out = []
+    updated = False
+    for line in lines:
+        if line.startswith(f"{name}="):
+            out.append(f"{name}={value}\n")
+            updated = True
+        else:
+            out.append(line)
+    if not updated:
+        out.append(f"\n# auto-generated, keep private\n{name}={value}\n")
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(out)
+    os.environ[name] = value
+
+
 # ============================================================
 # KMS 抽象
 # ============================================================
@@ -96,11 +120,12 @@ class LocalKMS(KMSProvider):
         return self.derive_key(key_id)
 
     def rotate_key(self, key_id: str, new_key: bytes) -> str:
-        """轮换派生参数（passphrase 不变 → 派生 key 不变）"""
+        """轮换派生 salt 并持久化；调用方需先用旧 key 重加密存量数据。"""
         import secrets as _secrets
         new_salt = _secrets.token_bytes(16)
         self.salt = new_salt
         self._cache.clear()
+        _update_env_value("MYHOME_KMS_SALT", new_salt.hex())
         logger.warning(f"KMS key {key_id} 轮换（salt 更新）")
         return f"v{int.from_bytes(new_salt[:4], 'big')}"
 
@@ -244,38 +269,25 @@ def emergency_rotate_all() -> dict:
     """
     import secrets as _secrets
 
+    old_passphrase = os.getenv("MYHOME_KMS_PASSPHRASE", "")
+    old_salt = os.getenv("MYHOME_KMS_SALT", "myhome-v1.0")
     new_passphrase = _secrets.token_urlsafe(32)
     new_salt = _secrets.token_bytes(16).hex()
 
     # 写 .env
-    env_path = "E:\\Code files\\Project\\myhome-agent\\.env"
     try:
-        lines = []
-        if os.path.exists(env_path):
-            with open(env_path, encoding="utf-8") as f:
-                lines = f.readlines()
-        # 替换或追加
-        new_lines = []
-        rotated_p = rotated_s = False
-        for line in lines:
-            if line.startswith("MYHOME_KMS_PASSPHRASE="):
-                new_lines.append(f"MYHOME_KMS_PASSPHRASE={new_passphrase}\n")
-                rotated_p = True
-            elif line.startswith("MYHOME_KMS_SALT="):
-                new_lines.append(f"MYHOME_KMS_SALT={new_salt}\n")
-                rotated_s = True
-            else:
-                new_lines.append(line)
-        if not rotated_p:
-            new_lines.append(f"\n# v1.0 KMS 应急轮换\nMYHOME_KMS_PASSPHRASE={new_passphrase}\n")
-        if not rotated_s:
-            new_lines.append(f"MYHOME_KMS_SALT={new_salt}\n")
-
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
+        _update_env_value("MYHOME_KMS_PASSPHRASE", new_passphrase)
+        _update_env_value("MYHOME_KMS_SALT", new_salt)
     except Exception as e:
         logger.error(f"轮换 .env 失败: {e}")
         return {"success": False, "error": str(e)}
+
+    reencrypt = reencrypt_all_fernet_data(
+        old_passphrase=old_passphrase,
+        old_salt=old_salt,
+        new_passphrase=new_passphrase,
+        new_salt=new_salt,
+    )
 
     # 通知 DPO（v1.0 实际场景）
     logger.critical(
@@ -286,6 +298,7 @@ def emergency_rotate_all() -> dict:
         "success": True,
         "new_passphrase_set": True,
         "new_salt_set": True,
+        "reencrypt": reencrypt,
         "actions": [
             "✅ 生成新 passphrase + salt",
             "✅ 写入 .env",
@@ -302,19 +315,72 @@ def emergency_rotate_all() -> dict:
 # ============================================================
 
 
-def reencrypt_all_fernet_data() -> dict:
-    """主密钥轮换后，重加密所有 Fernet 加密数据
+def _fernet_from_params(passphrase: str, salt: str):
+    from cryptography.fernet import Fernet
 
-    步骤：
-    1. 用旧 key 解密所有 cameras.encrypted_rtsp_url / members.telegram_token
-    2. 用新 key 重加密
-    3. 写回 db
+    kms = LocalKMS(passphrase=passphrase, salt=salt.encode())
+    return Fernet(kms.derive_key())
 
-    v1.0 stub：占位，需 v1.0.1 真实实现
-    """
+
+def reencrypt_all_fernet_data(
+    old_passphrase: str | None = None,
+    old_salt: str | None = None,
+    new_passphrase: str | None = None,
+    new_salt: str | None = None,
+) -> dict:
+    """主密钥轮换后，用旧 key 解密、新 key 重加密 Fernet 字段。"""
+    old_passphrase = old_passphrase or os.getenv("MYHOME_KMS_PASSPHRASE", "")
+    old_salt = old_salt or os.getenv("MYHOME_KMS_SALT", "myhome-v1.0")
+    new_passphrase = new_passphrase or os.getenv("MYHOME_KMS_PASSPHRASE", "")
+    new_salt = new_salt or os.getenv("MYHOME_KMS_SALT", "myhome-v1.0")
+    if not old_passphrase or not new_passphrase:
+        return {"success": False, "error": "KMS passphrase 未配置，无法重加密"}
+
+    old_fernet = _fernet_from_params(old_passphrase, old_salt)
+    new_fernet = _fernet_from_params(new_passphrase, new_salt)
+
+    import sqlite3
+
+    from ..config import DB_PATH
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rtsp = 0
+    twofa = 0
+    errors: list[str] = []
+    try:
+        tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "cameras" in tables:
+            rows = conn.execute(
+                "SELECT id, encrypted_rtsp_url FROM cameras WHERE encrypted_rtsp_url IS NOT NULL AND encrypted_rtsp_url != ''"
+            ).fetchall()
+            for row in rows:
+                try:
+                    plain = old_fernet.decrypt(row["encrypted_rtsp_url"].encode()).decode()
+                    token = new_fernet.encrypt(plain.encode()).decode()
+                    conn.execute("UPDATE cameras SET encrypted_rtsp_url = ? WHERE id = ?", (token, row["id"]))
+                    rtsp += 1
+                except Exception as e:
+                    errors.append(f"camera {row['id']}: {e}")
+        if "member_2fa" in tables:
+            rows = conn.execute(
+                "SELECT member_id, secret_key_encrypted FROM member_2fa WHERE enabled = 1 AND secret_key_encrypted != ''"
+            ).fetchall()
+            for row in rows:
+                try:
+                    plain = old_fernet.decrypt(row["secret_key_encrypted"].encode()).decode()
+                    token = new_fernet.encrypt(plain.encode()).decode()
+                    conn.execute("UPDATE member_2fa SET secret_key_encrypted = ? WHERE member_id = ?", (token, row["member_id"]))
+                    twofa += 1
+                except Exception as e:
+                    errors.append(f"2fa member {row['member_id']}: {e}")
+        conn.commit()
+    finally:
+        conn.close()
+
     return {
         "success": True,
-        "rtsp_urls_reencrypted": 0,
-        "bot_tokens_reencrypted": 0,
-        "note": "v1.0 stub — 真实实施留 v1.0.1",
+        "rtsp_urls_reencrypted": rtsp,
+        "member_2fa_reencrypted": twofa,
+        "errors": errors[:10],
     }

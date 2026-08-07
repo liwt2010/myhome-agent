@@ -119,6 +119,12 @@ class ConsensusEngine:
         if int(time.time()) > proposal.deadline_at:
             logger.warning(f"提案 {proposal_id} 已过截止时间")
             return False
+        if any(v.agent_id == agent_id for v in proposal.votes):
+            logger.warning(f"agent {agent_id} 重复投票被拒绝")
+            return False
+        if self.agents and agent_id not in self.agents:
+            logger.warning(f"agent {agent_id} 不在投票集合内")
+            return False
 
         # 记录
         vote = Vote(agent_id=agent_id, proposal_id=proposal_id, vote=vote_yes)
@@ -164,8 +170,10 @@ class ConsensusEngine:
         return proposal
 
     def _quorum_size(self) -> int:
-        """v3.1 简化：≥ 1/3 参与即 quorum"""
-        return max(1, len(self.agents) // 3)
+        """配置了 agent 集合时要求多数派参与，避免 1 票通过。"""
+        if not self.agents:
+            return 1
+        return max(1, (len(self.agents) + 1) // 2)
 
     def _persist_decision(self, proposal: Proposal):
         if not self.store:
@@ -230,15 +238,24 @@ class RuleConsensus:
         rule_id = proposal.payload["rule_id"]
         yaml_body = proposal.payload["yaml_body"]
         try:
+            from .engine import DSLError, parse_rule_yaml
+
+            parsed = parse_rule_yaml(yaml_body)
+            if parsed.id != rule_id:
+                logger.error(f"规则升级 ID 不匹配: {parsed.id} != {rule_id}")
+                return False
             with store._conn() as c:
                 # 全家庭同步
                 c.execute(
-                    """UPDATE rules SET yaml_body = ?, updated_at = ?
+                    """UPDATE rules SET yaml_body = ?, cooldown = ?, window = ?, updated_at = ?
                        WHERE id = ? AND archived_at IS NULL""",
-                    (yaml_body, int(time.time()), rule_id),
+                    (yaml_body, parsed.cooldown, parsed.window, int(time.time()), rule_id),
                 )
             logger.info(f"规则 {rule_id} 已跨家庭同步")
             return True
+        except DSLError as e:
+            logger.error(f"规则升级 YAML 校验失败: {e}")
+            return False
         except Exception as e:
             logger.error(f"apply_rule 失败: {e}")
             return False

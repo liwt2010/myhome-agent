@@ -13,9 +13,12 @@ from typing import Any
 
 import jwt
 
+from ..security.env_secret import get_or_create_secret
+
 logger = logging.getLogger(__name__)
 
-JWT_SECRET = "myhome-2fa-jwt-secret"  # v0.9 应改为 Fernet 派生
+# 从环境变量读取，未配置时自动生成并持久化到 .env，避免硬编码可伪造
+JWT_SECRET = get_or_create_secret("MYHOME_JWT_SECRET", nbytes=32)
 JWT_ALGO = "HS256"
 JWT_TTL = 30 * 60  # 30 分钟
 

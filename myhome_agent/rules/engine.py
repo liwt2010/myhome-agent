@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import yaml
 
@@ -236,6 +238,8 @@ def evaluate_predicate(pred: Any, ctx: "EvalContext") -> bool:
         return pred
     if isinstance(pred, (int, float)):
         return bool(pred)
+    if isinstance(pred, str):
+        return _eval_string_predicate(pred, ctx)
     if not isinstance(pred, dict):
         return False
 
@@ -299,8 +303,51 @@ def _eval_time_window(value: list, ctx: "EvalContext") -> bool:
 
 def _eval_sensor_fresh(key: str, value: Any, ctx: "EvalContext") -> bool:
     """sensor.fresh: <=60s → True if data age <= 60s"""
-    # v0.1 简化：始终返回 True
-    return True
+    age = ctx.field_value("sensor.age")
+    if age is None:
+        return True
+    try:
+        return float(age) <= float(value)
+    except (TypeError, ValueError):
+        return False
+
+
+_STRING_PREDICATE_RE = re.compile(r"^\s*([A-Za-z0-9_.]+)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$")
+
+
+def _eval_string_predicate(expr: str, ctx: "EvalContext") -> bool:
+    """支持 YAML 叶子写法：field > 30 / sensor.value == 'on'"""
+    m = _STRING_PREDICATE_RE.match(expr)
+    if not m:
+        return False
+    field, op, raw = m.group(1), m.group(2), m.group(3)
+    actual = ctx.field_value(field)
+    if actual is None:
+        return False
+    try:
+        target: Any = float(raw)
+    except ValueError:
+        target = raw.strip().strip("'\"")
+
+    if op == "==":
+        return actual == target
+    if op == "!=":
+        return actual != target
+    try:
+        actual_num = float(actual)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(target, (int, float)):
+        return False
+    if op == ">":
+        return actual_num > target
+    if op == ">=":
+        return actual_num >= target
+    if op == "<":
+        return actual_num < target
+    if op == "<=":
+        return actual_num <= target
+    return False
 
 
 def _eval_sensor_value(value: Any, ctx: "EvalContext") -> bool:
@@ -366,10 +413,18 @@ class RuleStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
         """确保 4 张表存在（依赖 memory.schema.sql 已加载）"""
@@ -382,6 +437,8 @@ class RuleStore:
                   description TEXT NOT NULL,
                   yaml_body TEXT NOT NULL,
                   confidence_base REAL DEFAULT 0.7,
+                  cooldown INTEGER DEFAULT 3600,
+                  window TEXT DEFAULT '1min',
                   enabled INTEGER DEFAULT 1,
                   archived_at INTEGER,
                   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -430,20 +487,28 @@ class RuleStore:
                 );
                 """
             )
+            # 兼容旧库：补 cooldown/window 列
+            cols = {row["name"] for row in c.execute("PRAGMA table_info(rules)").fetchall()}
+            if "cooldown" not in cols:
+                c.execute("ALTER TABLE rules ADD COLUMN cooldown INTEGER DEFAULT 3600")
+            if "window" not in cols:
+                c.execute("ALTER TABLE rules ADD COLUMN window TEXT DEFAULT '1min'")
 
     def upsert_rule(self, rule: Rule) -> None:
         with self._conn() as c:
             c.execute(
                 """INSERT OR REPLACE INTO rules (
                   id, household_id, description, yaml_body, confidence_base,
-                  enabled, severity, category, author_type, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  cooldown, window, enabled, severity, category, author_type, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rule.id,
                     rule.household_id,
                     rule.description,
                     yaml.dump(rule.yaml_body, allow_unicode=True),
                     rule.confidence_base,
+                    rule.cooldown,
+                    rule.window,
                     1 if rule.enabled else 0,
                     rule.severity,
                     rule.category,
@@ -513,12 +578,13 @@ class RuleStore:
         confidence: float | None = None,
         matched: list | None = None,
         evidence: dict | None = None,
+        detail: dict | str | None = None,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
                 """INSERT INTO rule_audit_log (
-                  rule_id, household_id, kind, confidence, matched_predicates, evidence_snapshot
-                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                  rule_id, household_id, kind, confidence, matched_predicates, evidence_snapshot, detail
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rule_id,
                     household_id,
@@ -526,6 +592,7 @@ class RuleStore:
                     confidence,
                     json.dumps(matched or [], ensure_ascii=False),
                     json.dumps(evidence or {}, ensure_ascii=False),
+                    json.dumps(detail, ensure_ascii=False) if detail is not None else None,
                 ),
             )
             return cur.lastrowid
@@ -536,8 +603,8 @@ class RuleStore:
             description=row["description"],
             yaml_body=yaml.safe_load(row["yaml_body"]) or {},
             confidence_base=row["confidence_base"],
-            cooldown=row["cooldown"] if "cooldown" in row.keys() else 3600,
-            window=row["window"] if "window" in row.keys() else "1min",
+            cooldown=row["cooldown"],
+            window=row["window"],
             severity=row["severity"],
             category=row["category"],
             author_type=row["author_type"],
@@ -568,10 +635,14 @@ class RuleScanner:
         store: RuleStore,
         on_fire: Callable[[Rule, dict, CalibratedConfidence], None] | None = None,
         fallback_reasoner: "FallbackReasoner | None" = None,
+        alert_store: Any | None = None,
+        notifier: Any | None = None,
     ):
         self.store = store
         self.on_fire = on_fire or self._default_on_fire
         self.fallback = fallback_reasoner
+        self.alert_store = alert_store
+        self.notifier = notifier
         self.window = WindowStore()
         self.eval_ctx = EvalContext(window=self.window)
         self._last_scan = 0.0
@@ -632,6 +703,50 @@ class RuleScanner:
             matched=list(evidence.get("matched", [])),
             evidence=evidence,
         )
+
+        # 安全/关怀级规则：写开放告警 + 投递通知（Telegram / 站内）
+        if self.alert_store is not None and rule.severity in ("safety", "care"):
+            title = f"[{rule.severity}] {rule.description}"
+            alert_id = self.alert_store.add_alert(
+                rule.severity,
+                title,
+                detail=f"rule={rule.id} confidence={conf.final:.2f}",
+                source="rule_engine",
+            )
+            if self.notifier is not None:
+                self.notifier.notify_rule_fire(alert_id=alert_id, rule=rule, confidence=conf.final)
+
+        # then.control 动作：进入待确认队列，绝不自动执行
+        then_actions = rule.yaml_body.get("then", []) or []
+        for item in then_actions:
+            if not isinstance(item, dict):
+                continue
+            control = item.get("control")
+            if not isinstance(control, dict):
+                continue
+            device_id = control.get("device_id") or control.get("device")
+            action = control.get("action")
+            if self.alert_store is None or not device_id or not action:
+                continue
+            try:
+                token = self.alert_store.create_pending_action(
+                    rule.id, device_id, action, control.get("params")
+                )
+            except Exception as e:
+                logger.error("创建待确认动作失败: %s", e)
+                continue
+            alert_id = self.alert_store.add_alert(
+                "care",
+                f"[confirm] {rule.description}",
+                detail=f"pending_action={token} device={device_id} action={action}",
+                source="rule_engine",
+            )
+            if self.notifier is not None:
+                self.notifier.notify_alert(
+                    alert_id=alert_id,
+                    title="需确认操作",
+                    body=f"规则 {rule.id}：{device_id} {action}；确认: /api/actions/{token}/confirm",
+                )
 
     def _has_signal_contradiction(self, evidence: dict) -> bool:
         """检测证据中是否有矛盾（v0.3 简化：检查 attributes.has_contradiction 标记）"""
@@ -694,6 +809,10 @@ class RuleScanner:
                 continue
             if state.state == "cooldown" and state.cooldown_until and now < state.cooldown_until:
                 continue
+            if state.state == "cooldown" and state.cooldown_until and now >= state.cooldown_until:
+                # cooldown 到期后复位为 armed，允许再次触发
+                state.state = "armed"
+                state.cooldown_until = None
 
             # armed / cooldown 已结束 → 评估谓词
             try:
@@ -756,8 +875,32 @@ class RuleScanner:
         return fired
 
     def _collect_matched(self, rule: Rule, ctx: EvalContext) -> list[str]:
-        """收集本次命中的谓词（粗略版：v0.1 留空）"""
-        return []
+        """收集本次命中的叶子谓词"""
+        matched: list[str] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+            elif isinstance(node, dict):
+                for key, value in node.items():
+                    if key in ("all", "any", "none"):
+                        walk(value)
+                    else:
+                        try:
+                            if evaluate_predicate({key: value}, ctx):
+                                matched.append(f"{key}: {value}")
+                        except Exception:
+                            pass
+            elif isinstance(node, str):
+                try:
+                    if evaluate_predicate(node, ctx):
+                        matched.append(node)
+                except Exception:
+                    pass
+
+        walk(rule.yaml_body.get("when"))
+        return matched
 
     def run_forever(self, household_id: int = 1, interval: float = 10.0) -> None:
         """永久循环（供后台线程）"""

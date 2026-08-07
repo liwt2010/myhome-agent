@@ -57,46 +57,59 @@ class TwoFactorManager:
 
     def __init__(self, store: Any):
         self.store = store
+        # 服务端暂存的 2FA 启用挑战，避免信任客户端回传的 secret
+        self._pending_setup: dict[str, dict] = {}
 
     # ============================================================
     # 启用流程
     # ============================================================
 
     def start_setup(self, member_id: int) -> dict:
-        """生成 TOTP secret + 备用码（首次启用）"""
+        """生成 TOTP secret + 备用码（首次启用），secret 由服务端暂存。"""
         import pyotp
+        import secrets as _secrets
 
         secret = pyotp.random_base32()
         backup_codes = [self._gen_backup_code() for _ in range(BACKUP_CODES_COUNT)]
         encrypted_secret = self._encrypt(secret)
         encrypted_backup = [self._bcrypt_hash(c) for c in backup_codes]
 
-        # 不立刻启用——先让用户扫 QR 码验证
+        challenge_id = _secrets.token_urlsafe(16)
+        self._pending_setup[challenge_id] = {
+            "member_id": member_id,
+            "secret_plain": secret,
+            "encrypted_secret": encrypted_secret,
+            "encrypted_backup": encrypted_backup,
+            "created_at": __import__("time").time(),
+        }
+
         provisioning_uri = pyotp.TOTP(secret).provisioning_uri(
             name=f"member:{member_id}",
             issuer_name=TOTP_ISSUER,
         )
 
         return {
+            "challenge_id": challenge_id,
             "member_id": member_id,
             "secret_plain": secret,  # 仅返回一次，让前端生成 QR
             "provisioning_uri": provisioning_uri,
             "backup_codes_plain": backup_codes,  # 仅返回一次，让用户保存
-            "encrypted_secret": encrypted_secret,
-            "encrypted_backup": encrypted_backup,
-            "next_step": "用户扫 QR + 输入 6 位码确认 + 保存备用码"
+            "next_step": "用户扫 QR + 输入 6 位码确认 + 保存备用码",
         }
 
-    def confirm_setup(self, member_id: int, code: str, secret_plain: str,
-                       encrypted_secret: str, encrypted_backup: list[str]) -> bool:
-        """用户输入 6 位码确认启用"""
+    def confirm_setup(self, challenge_id: str, code: str) -> tuple[bool, str]:
+        """校验服务端暂存的挑战 + TOTP，通过后启用 2FA。"""
         import pyotp
 
-        if not pyotp.TOTP(secret_plain).verify(code, valid_window=1):
-            logger.warning(f"member {member_id} 2FA setup 验证码错误")
-            return False
+        pending = self._pending_setup.pop(challenge_id, None)
+        if not pending:
+            return False, "挑战不存在或已过期，请重新开始"
+        if __import__("time").time() - pending["created_at"] > 600:
+            return False, "挑战已过期，请重新开始"
+        if not pyotp.TOTP(pending["secret_plain"]).verify(code, valid_window=1):
+            logger.warning("member %s 2FA setup 验证码错误", pending["member_id"])
+            return False, "验证码错误"
 
-        # 写入数据库
         try:
             with self.store._conn() as c:
                 c.execute(
@@ -105,16 +118,16 @@ class TwoFactorManager:
                         enabled_at, last_used_at, failed_attempts)
                        VALUES (?, 1, ?, ?, ?, NULL, 0)""",
                     (
-                        member_id,
-                        encrypted_secret,
-                        json.dumps(encrypted_backup),
+                        pending["member_id"],
+                        pending["encrypted_secret"],
+                        json.dumps(pending["encrypted_backup"]),
                         int(__import__("time").time()),
                     ),
                 )
-            return True
+            return True, "OK"
         except Exception as e:
-            logger.error(f"启用 2FA 失败: {e}")
-            return False
+            logger.error("启用 2FA 失败: %s", e)
+            return False, "启用失败，请稍后重试"
 
     # ============================================================
     # 验证流程
@@ -201,8 +214,8 @@ class TwoFactorManager:
     # ============================================================
 
     def _gen_backup_code(self) -> str:
-        """生成备用码（8 位 hex）"""
-        return secrets.token_hex(4).upper()
+        """生成备用码（12 位 hex，48-bit 熵）"""
+        return secrets.token_hex(6).upper()
 
     def _encrypt(self, plain: str) -> str:
         from ..vision.crypto import encrypt

@@ -5,6 +5,7 @@ v2.20+ 计划：OllamaLLMClient（本地 Layer 2）
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from abc import ABC, abstractmethod
@@ -23,7 +24,7 @@ class ToolCall(dict):
                 "type": "function",
                 "function": {
                     "name": name,
-                    "arguments": arguments if isinstance(arguments, str) else str(arguments),
+                    "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False),
                 },
             }
         )

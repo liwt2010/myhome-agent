@@ -205,6 +205,22 @@ class Agent:
                 json.dumps(content_blocks, ensure_ascii=False),
             )
 
+            # 把 assistant 消息（含 tool_calls）追加回本次会话消息列表
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.text or None}
+            if response.tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": json.dumps(tc["function"]["arguments"], ensure_ascii=False),
+                        },
+                    }
+                    for tc in response.tool_calls
+                ]
+            messages.append(assistant_msg)
+
             if not response.tool_calls:
                 return response.text or "（智能体没有返回内容）"
 
@@ -237,21 +253,22 @@ class Agent:
                 if result.get("needs_confirm") and not confirm_msg:
                     confirm_msg = result["message"]
 
-                # 把工具调用串回消息列表
+                # 工具结果按 OpenAI tool role 追加，供下一轮对话使用
                 new_tool_msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+                messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                 })
                 logger.debug("工具 %s: %s", name, result.get("message", ""))
 
-            # 把工具结果作为 user 追加（OpenAI tool_call_id 兼容）
-            messages.append({
-                "role": "user",
-                "content": json.dumps(new_tool_msgs, ensure_ascii=False),
-            })
+            # 以兼容的 blocks 格式持久化，供跨重启重建消息
             self.store.append_chat(
-                session_id, "user",
+                session_id, "tool",
                 json.dumps(new_tool_msgs, ensure_ascii=False),
             )
 
@@ -268,6 +285,7 @@ class AgentSession:
     def __init__(self, store: Store, api_key: str | None = None, registry=None, llm_client=None):
         self.agent = Agent(store, api_key, registry, llm_client=llm_client)
         self.session_id = uuid.uuid4().hex[:12]
+        self.created_at = time.time()
 
     def send(self, message: str) -> str:
         return self.agent.chat(message, session_id=self.session_id)

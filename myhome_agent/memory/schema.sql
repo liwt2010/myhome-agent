@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS rules (
   description TEXT NOT NULL,
   yaml_body TEXT NOT NULL,
   confidence_base REAL DEFAULT 0.7,
+  cooldown INTEGER DEFAULT 3600,
+  window TEXT DEFAULT '1min',
   enabled INTEGER DEFAULT 1,
   archived_at INTEGER,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -187,3 +189,32 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 
 INSERT OR REPLACE INTO schema_meta(key, value) VALUES('version', '0.7.0');
 INSERT OR REPLACE INTO schema_meta(key, value) VALUES('rule_engine', 'v0.1.0');
+
+-- 应用设置（隐私开关、场景配置等，key-value 存储）
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
+-- 成员登录凭据（bcrypt 散列）
+CREATE TABLE IF NOT EXISTS member_credentials (
+  member_id INTEGER PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+  FOREIGN KEY (member_id) REFERENCES members(id)
+);
+
+-- 规则触发的待确认控制动作
+CREATE TABLE IF NOT EXISTS pending_actions (
+  id INTEGER PRIMARY KEY,
+  token TEXT UNIQUE NOT NULL,
+  rule_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  params TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+  expires_at INTEGER NOT NULL,
+  decided_at INTEGER
+);

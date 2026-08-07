@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
@@ -21,11 +24,19 @@ class Store:
         with self._conn() as c:
             c.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     # ---------- 设备 ----------
 
@@ -251,3 +262,68 @@ class Store:
                 "ORDER BY id DESC LIMIT ?", (session_id, limit_turns * 2),
             ).fetchall()
         return [{"role": r["role"], "content": json.loads(r["content"])} for r in reversed(rows)]
+
+    # ---------- 应用设置 ----------
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        with self._conn() as c:
+            row = c.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                """INSERT INTO app_settings (key, value, updated_at)
+                   VALUES (?, ?, datetime('now','localtime'))
+                   ON CONFLICT(key) DO UPDATE SET
+                     value = excluded.value,
+                     updated_at = excluded.updated_at""",
+                (key, value),
+            )
+
+    def list_settings(self) -> list[dict]:
+        with self._conn() as c:
+            return [dict(r) for r in c.execute("SELECT key, value FROM app_settings ORDER BY key")]
+
+    # ---------- 待确认控制动作 ----------
+
+    def create_pending_action(
+        self,
+        rule_id: str,
+        device_id: str,
+        action: str,
+        params: list | None = None,
+        ttl_seconds: int = 600,
+    ) -> str:
+        token = secrets.token_urlsafe(16)
+        now = int(time.time())
+        with self._conn() as c:
+            c.execute(
+                """INSERT INTO pending_actions
+                   (token, rule_id, device_id, action, params, status, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (token, rule_id, device_id, action, json.dumps(params or [], ensure_ascii=False), now, now + ttl_seconds),
+            )
+        return token
+
+    def list_pending_actions(self, status: str = "pending") -> list[dict]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM pending_actions WHERE status = ? ORDER BY created_at DESC LIMIT 50",
+                (status,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_pending_action(self, token: str) -> dict | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM pending_actions WHERE token = ?", (token,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_pending_action_status(self, token: str, status: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE pending_actions SET status = ?, decided_at = strftime('%s','now') WHERE token = ?",
+                (status, token),
+            )

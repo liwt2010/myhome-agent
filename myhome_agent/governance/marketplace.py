@@ -261,10 +261,12 @@ class Wallet:
         try:
             with self.store._conn() as c:
                 if from_id != "_mint_":
-                    c.execute(
+                    cur = c.execute(
                         "UPDATE wallets SET balance = balance - ? WHERE agent_id = ? AND balance >= ?",
                         (amount, from_id, amount),
                     )
+                    if cur.rowcount == 0:
+                        raise ValueError(f"余额不足: {from_id}")
                 if to_id != "_burn_":
                     c.execute(
                         "UPDATE wallets SET balance = balance + ? WHERE agent_id = ?",
@@ -283,10 +285,13 @@ class Wallet:
         """任务托管"""
         try:
             with self.store._conn() as c:
-                c.execute(
-                    "UPDATE wallets SET escrow_balance = escrow_balance + ? WHERE agent_id = ?",
-                    (amount, buyer),
+                cur = c.execute(
+                    "UPDATE wallets SET balance = balance - ?, escrow_balance = escrow_balance + ? "
+                    "WHERE agent_id = ? AND balance >= ?",
+                    (amount, amount, buyer, amount),
                 )
+                if cur.rowcount == 0:
+                    raise ValueError(f"buyer 余额不足: {buyer}")
                 c.execute(
                     "INSERT INTO task_escrow (task_id, buyer, seller, amount, status) VALUES (?, ?, ?, ?, 'held')",
                     (task_id, buyer, seller, amount),
@@ -318,6 +323,11 @@ class Wallet:
                 c.execute(
                     "UPDATE task_escrow SET status = 'released' WHERE task_id = ?",
                     (task_id,),
+                )
+                c.execute(
+                    "INSERT INTO wallet_transactions (from_agent, to_agent, amount, reason, ts) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (row["buyer"], row["seller"], amount, f"escrow_release:{task_id}", int(time.time())),
                 )
             return True
         except Exception as e:

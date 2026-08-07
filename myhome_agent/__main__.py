@@ -132,13 +132,13 @@ def cmd_serve():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    from .gateway.server import app
+    from .gateway.server import app, notifier
 
     # v0.1 启动规则扫描器（后台线程）
     from .rules.engine import RuleStore, RuleScanner
     import threading
     rule_store = RuleStore(DB_PATH)
-    scanner = RuleScanner(rule_store)
+    scanner = RuleScanner(rule_store, alert_store=store, notifier=notifier)
     scanner_thread = threading.Thread(
         target=scanner.run_forever,
         kwargs={"household_id": 1, "interval": 10.0},

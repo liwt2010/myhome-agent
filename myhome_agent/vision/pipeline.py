@@ -16,9 +16,10 @@ import logging
 import sqlite3
 import time
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -123,24 +124,23 @@ class RTSPCameraSource(CameraSource):
 class MockCameraSource(CameraSource):
     """v0.2 mock 摄像头（用于开发与测试）"""
 
-    def __init__(self, camera_id: str, mock_person: bool = True):
+    def __init__(self, camera_id: str, mock_event: bool = True):
         self.camera_id = camera_id
-        self.mock_person = mock_person
+        self.mock_event = mock_event
         self._opened = False
         self._frame_count = 0
-        # mock 周期：每 10 帧出现 1 次人形
+        # mock 周期：每 10 帧出现 1 次事件
         self._cycle = 10
 
-    def open(self) -> None:
+    def open(self) -> bool:
         self._opened = True
         logger.debug(f"Mock camera {self.camera_id} opened")
+        return True
 
     def read(self) -> tuple[bool, "np.ndarray | None"]:
         self._frame_count += 1
-        if self.mock_person and self._frame_count % self._cycle == 0:
-            # mock：返回 None 但 is_opened=True 表示有事件
-            return True, None
-        return False, None
+        # mock：事件模式下每帧都有画面（None 帧由检测器处理）
+        return self.mock_event, None
 
     def close(self) -> None:
         self._opened = False
@@ -308,10 +308,18 @@ class VisionStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
         with self._conn() as c:
@@ -359,6 +367,8 @@ class VisionStore:
                 encrypted = encrypt(cam.rtsp_url)
             except Exception:
                 encrypted = ""
+        # 加密成功时不再写明文，避免磁盘明文泄露
+        stored_rtsp_url = cam.rtsp_url if not encrypted else ""
 
         with self._conn() as c:
             c.execute(
@@ -369,7 +379,7 @@ class VisionStore:
                     cam.id,
                     cam.household_id,
                     cam.name,
-                    cam.rtsp_url,  # 兼容期：仍写明文
+                    stored_rtsp_url,
                     cam.location,
                     json.dumps(cam.capabilities, ensure_ascii=False),
                     1 if cam.enabled else 0,
@@ -386,14 +396,7 @@ class VisionStore:
             ).fetchone()
         if not row:
             return None
-        # v0.3 优先用 encrypted_rtsp_url
-        rtsp_url = row["rtsp_url"]
-        if row.get("encrypted_rtsp_url") if hasattr(row, "get") else row["encrypted_rtsp_url"]:
-            try:
-                from .crypto import decrypt
-                rtsp_url = decrypt(row["encrypted_rtsp_url"])
-            except Exception:
-                pass
+        rtsp_url = self._resolve_rtsp(row)
         return Camera(
             id=row["id"],
             name=row["name"],
@@ -414,7 +417,7 @@ class VisionStore:
             Camera(
                 id=r["id"],
                 name=r["name"],
-                rtsp_url=r["rtsp_url"],
+                rtsp_url=self._resolve_rtsp(r),
                 location=r["location"],
                 capabilities=json.loads(r["capabilities"] or "{}"),
                 enabled=bool(r["enabled"]),
@@ -422,6 +425,20 @@ class VisionStore:
             )
             for r in rows
         ]
+
+    @staticmethod
+    def _resolve_rtsp(row) -> str:
+        """优先解密 encrypted_rtsp_url，兼容旧明文。"""
+        encrypted = row["encrypted_rtsp_url"] if row["encrypted_rtsp_url"] else ""
+        if encrypted:
+            try:
+                from .crypto import decrypt
+                decrypted = decrypt(encrypted)
+                if decrypted:
+                    return decrypted
+            except Exception:
+                pass
+        return row["rtsp_url"] or ""
 
     def log_event(self, ev: VisionEvent) -> int:
         with self._conn() as c:
@@ -488,12 +505,16 @@ class VisionPipeline:
         source: CameraSource,
         detectors: list[LocalDetector],
         fps: int = 5,
+        alert_store: Any | None = None,
+        notifier: Any | None = None,
     ):
         self.store = store
         self.camera_id = camera_id
         self.source = source
         self.detectors = detectors
         self.fps = fps
+        self.alert_store = alert_store
+        self.notifier = notifier
         self._running_events: dict[str, VisionEvent] = {}
         self._llm_vision: LLMVisionAnalyzer | None = None
 
@@ -509,6 +530,11 @@ class VisionPipeline:
         if not ok:
             return []
 
+        # 清理长时间未更新的持续事件
+        now = int(time.time())
+        for key in [k for k, ev in self._running_events.items() if ev.ended_at and now - ev.ended_at > 30]:
+            self._running_events.pop(key, None)
+
         # 跑所有检测器
         detections: list[Detection] = []
         for det in self.detectors:
@@ -516,7 +542,6 @@ class VisionPipeline:
 
         # 转换为视觉事件
         new_events: list[VisionEvent] = []
-        now = int(time.time())
         for d in detections:
             event_key = f"{self.camera_id}:{d.kind}"
             if event_key in self._running_events:
@@ -535,13 +560,57 @@ class VisionPipeline:
                 )
                 self._running_events[event_key] = ev
                 new_events.append(ev)
+                ev.snapshot_path = self._save_snapshot(frame, self.camera_id, d.kind, now)
                 # 写库
                 self.store.log_event(ev)
+                self._notify_detection(d, ev)
                 logger.info(
                     f"vision: cam={self.camera_id} kind={d.kind} conf={d.confidence:.2f}"
                 )
 
         return new_events
+
+    VISION_ALERT_KINDS = {"fall", "fire", "person"}
+
+    def _save_snapshot(self, frame, camera_id: str, kind: str, now: int) -> str | None:
+        """把检测帧保存到快照目录，返回文件名。"""
+        if frame is None:
+            return None
+        try:
+            import cv2
+            from pathlib import Path
+
+            from ..config import SNAPSHOT_DIR
+
+            snap_dir = Path(SNAPSHOT_DIR)
+            snap_dir.mkdir(parents=True, exist_ok=True)
+            name = f"{camera_id}_{kind}_{now}.jpg"
+            ok, buf = cv2.imencode(".jpg", frame)
+            if not ok:
+                return None
+            (snap_dir / name).write_bytes(buf.tobytes())
+            return name
+        except Exception as e:
+            logger.warning("快照保存失败: %s", e)
+            return None
+
+    def _notify_detection(self, d: Detection, ev: VisionEvent) -> None:
+        """安全类视觉事件 → 开放告警 + 通知（无规则引擎参与）。"""
+        if self.alert_store is None or d.kind not in self.VISION_ALERT_KINDS:
+            return
+        title = f"[vision:{d.kind}] {self.camera_id}"
+        alert_id = self.alert_store.add_alert(
+            "safety",
+            title,
+            detail=f"confidence={d.confidence:.2f} bbox={d.bbox}",
+            source="vision",
+        )
+        if self.notifier is not None:
+            self.notifier.notify_alert(
+                alert_id=alert_id,
+                title=title,
+                body=f"摄像头 {self.camera_id} 检测到 {d.kind}，置信度 {d.confidence:.2f}",
+            )
 
     def run_forever(self) -> None:
         """永久循环（后台线程）"""

@@ -18,6 +18,12 @@ dependencies = [
     "numpy>=1.24.0",             # 数组操作
     "cryptography>=42.0.0",      # rtsp_url 凭证加密
     "Pillow>=10.0.0",            # 截图保存
+    "PyJWT>=2.8.0",              # 2FA 会话 token
+    "pyotp>=2.9.0",              # TOTP 2FA
+    "bcrypt>=4.1.0",             # 2FA 备用码散列
+    "webauthn>=2.0.0",           # WebAuthn/FIDO2
+    "python-telegram-bot>=21.0", # Telegram 通道
+    "phe>=1.5.0",                # Paillier 同态加密
 ]
 
 [project.optional-dependencies]
@@ -32,3 +38,7 @@ include = ["myhome_agent*"]
 
 [project.scripts]
 myhome-agent = "myhome_agent.__main__:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

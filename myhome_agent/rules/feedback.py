@@ -71,13 +71,13 @@ def submit_feedback(
         raise ValueError(f"非法反馈类型: {feedback}")
 
     # 写反馈
-    rule_store._conn().execute(
-        """INSERT INTO rule_feedback (
-          rule_id, fire_id, household_id, member_id, feedback, note
-        ) VALUES (?, ?, ?, ?, ?, ?)""",
-        (rule_id, fire_id, 1, member_id, feedback, note),
-    )
-    rule_store._conn().commit()
+    with rule_store._conn() as c:
+        c.execute(
+            """INSERT INTO rule_feedback (
+              rule_id, fire_id, household_id, member_id, feedback, note
+            ) VALUES (?, ?, ?, ?, ?, ?)""",
+            (rule_id, fire_id, 1, member_id, feedback, note),
+        )
 
     # 读 rule 和 state
     rule = next((r for r in rule_store.list_enabled_rules() if r.id == rule_id), None)
@@ -112,9 +112,10 @@ def submit_feedback(
         # 检查自动暂停
         if state.false_positive_count >= 5:
             rule_disabled = True
-            rule_store._conn().execute(
-                "UPDATE rules SET enabled = 0 WHERE id = ?", (rule_id,)
-            )
+            with rule_store._conn() as c:
+                c.execute(
+                    "UPDATE rules SET enabled = 0 WHERE id = ?", (rule_id,)
+                )
             rule_store.log_fire(
                 rule_id=rule_id, household_id=1, kind="auto_disabled",
                 detail={"reason": f"30天内误报 {state.false_positive_count} 次"},
@@ -126,18 +127,20 @@ def submit_feedback(
         rationale = "24h 临时抑制"
     elif feedback == FEEDBACK_DISABLE:
         rule_disabled = True
-        rule_store._conn().execute(
-            "UPDATE rules SET enabled = 0 WHERE id = ?", (rule_id,)
-        )
+        with rule_store._conn() as c:
+            c.execute(
+                "UPDATE rules SET enabled = 0 WHERE id = ?", (rule_id,)
+            )
         rationale = "立即禁用"
 
     # 调整 confidence_base（应用增量）
     if confidence_delta != 0:
         new_base = max(0.1, min(0.95, rule.confidence_base + confidence_delta))
-        rule_store._conn().execute(
-            "UPDATE rules SET confidence_base = ? WHERE id = ?",
-            (new_base, rule_id),
-        )
+        with rule_store._conn() as c:
+            c.execute(
+                "UPDATE rules SET confidence_base = ? WHERE id = ?",
+                (new_base, rule_id),
+            )
 
     # 写 audit log
     rule_store.log_fire(
@@ -147,7 +150,6 @@ def submit_feedback(
     )
 
     rule_store.update_state(state)
-    rule_store._conn().commit()
 
     return FeedbackResult(
         feedback=feedback,
@@ -190,9 +192,10 @@ def auto_pause_check(rule_store: RuleStore, household_id: int = 1) -> list[dict]
 
         if fp_count > 5:
             # 自动暂停
-            rule_store._conn().execute(
-                "UPDATE rules SET enabled = 0 WHERE id = ?", (rule.id,)
-            )
+            with rule_store._conn() as c:
+                c.execute(
+                    "UPDATE rules SET enabled = 0 WHERE id = ?", (rule.id,)
+                )
             rule_store.log_fire(
                 rule_id=rule.id, household_id=household_id, kind="auto_disabled",
                 detail={"reason": f"30天内误报 {fp_count} 次"},
@@ -215,7 +218,6 @@ def auto_pause_check(rule_store: RuleStore, household_id: int = 1) -> list[dict]
                 "reason": "30天零命中，建议复审",
             })
 
-    rule_store._conn().commit()
     if actions:
         logger.info(f"auto_pause_check: {len(actions)} 条规则需处理")
     return actions

@@ -1,97 +1,36 @@
-# Security Policy
+# 安全说明（Security Policy）
 
-## Supported Versions
+## 安全模型
 
-| Version | Supported          |
-| ------- | ------------------ |
-| v3.0.1+ | ✅ Active          |
-| v0.7.x  | ⚠️ Security fixes only |
-| < v0.7  | ❌ End of life     |
+myhome-agent 面向家庭局域网部署，安全设计如下：
 
-## Reporting a Vulnerability
+- **网关鉴权**：除健康检查、登录、2FA/WebAuthn 登录外，所有 REST 与 WebSocket 都要求 Bearer 凭据（`MYHOME_API_TOKEN` 或成员 JWT）。
+- **成员登录与 RBAC**：密码以 bcrypt 存储；角色权限矩阵控制设备控制、设置、导出与审计。
+- **2FA / WebAuthn**：TOTP 备用码 bcrypt 存储；WebAuthn 使用 `py_webauthn` 真实验签；JWT 密钥来自 `.env`，不硬编码。
+- **高危操作二次确认**：门锁 / 燃气 / 摄像头 / 主窗帘控制必须携带 `X-2FA-Token`；规则触发的直接控制进入 `pending_actions` 等待确认。
+- **凭证加密**：RTSP URL 使用 Fernet 加密存储；优先使用 KMS（PBKDF2）派生。
+- **注入防护**：硬规则条件使用 AST 白名单求值，不执行任意表达式。
+- **可审计**：规则触发、治理决策、通知投递、待确认动作全部落库，可通过 `/api/audit/*` 查询与导出。
 
-**Please do NOT open a public GitHub issue for security problems.**
+## 已知边界
 
-Report security issues privately to: **security@myhome-agent.local**
+- LLM 请求会携带家庭摘要与工具结果，当前没有自动脱敏层；敏感环境请使用本地模型。
+- WebSocket 支持成员 JWT 与 API token；请使用 HTTPS 反向代理对外暴露。
+- 联邦学习同态加密为真实 Paillier 实现，但跨家庭密钥分发协议仍是简化版本。
 
-Include:
-- Description of the vulnerability
-- Steps to reproduce
-- Affected version
-- Potential impact
+## 部署建议
 
-We aim to respond within **72 hours** and provide a fix timeline within **7 days** for critical issues.
+- 将 `.env` 权限设为 `600`，不要提交或分发。
+- 使用 HTTPS 反向代理（Caddy / Nginx / Tailscale 等）。
+- 以非 root 用户运行；定期轮换 `MYHOME_API_TOKEN`、`MYHOME_JWT_SECRET` 与 `.env` 中的其他密钥。
+- 使用 `git init` 后及时提交基线，便于追踪变更。
 
-## Security Architecture
+## 报告安全漏洞
 
-myhome-agent is designed with **local-first privacy** as the core principle.
+请通过 GitHub Security Advisories（私有报告）提交漏洞，不要公开泄露细节。报告中请包含：
 
-### Data Storage
-- All data stored locally on user's NAS (SQLite + WAL mode)
-- 30-day automatic cleanup for sensor data, events, vision snapshots
-- household_id strict isolation in all queries (CI enforced)
-- Fernet encryption for sensitive data (rtsp_url, snapshots, 2FA secrets)
+- 受影响版本与部署方式
+- 复现步骤与最小示例
+- 影响评估（例如是否可导致未授权设备控制 / 数据泄露）
 
-### Authentication
-- TOTP-based 2FA (RFC 6238) — see `auth/twofa.py`
-- WebAuthn/FIDO2 support (YubiKey / TouchID / Windows Hello) — see `auth/webauthn.py`
-- JWT session tokens (30-minute TTL) — see `auth/session.py`
-- Per-member chat_id binding for Telegram
-
-### Authorization
-- 9-role policy matrix (admin / adult / elder / child / nanny / etc.) — see `governance/policy.py`
-- 4-dimensional risk assessment for autonomous actions
-- L0-L4 autonomy levels with mandatory confirm for safety operations
-- Audit log for all governance decisions
-
-### LLM Integration
-- Privacy modes: `public` (cloud) / `sensitive` (local only)
-- 国货 LLM 优先 (DeepSeek, Qwen, Zhipu, Kimi, Wenxin) — data sovereignty
-- 80/20 budget split: 80% 国货 / 20% 国外
-- redactor removes sensitive fields before cloud LLM calls
-- API keys stored in `.env` (NEVER commit — see `.gitignore`)
-
-### Federation (v4.0+)
-- Secure Aggregation: Cloud never sees individual household data
-- Differential Privacy: Gaussian noise added to gradients
-- 8-bit gradient compression to save bandwidth
-- Multi-firm federated training with consent + GDPR right-to-be-forgotten
-
-## Security Best Practices for Users
-
-1. **Never commit `.env`** — `.gitignore` includes it, but always verify
-2. **Use environment variables** for secrets in production
-3. **Rotate Fernet keys** every 90 days
-4. **Enable 2FA** for admin accounts
-5. **Use WebAuthn** for irreversible capability operations
-6. **Review audit logs** monthly
-7. **Backup `.env` securely** (e.g., password manager)
-8. **Update regularly** for security patches
-
-## Reporting Security Issues Timeline
-
-| Severity | Initial Response | Fix Target |
-| -------- | ---------------- | ----------- |
-| Critical | 24 hours | 7 days |
-| High     | 72 hours | 30 days |
-| Medium   | 1 week | 90 days |
-| Low      | 2 weeks | Next release |
-
-## Acknowledgments
-
-We thank the security community for responsible disclosure.
-
-## See Also
-
-- [DEPLOYMENT.md](DEPLOYMENT.md) — Production deployment guide
-- [DPIA.md](DPIA.md) — Data Protection Impact Assessment
-- [DPA.md](DPA.md) — Data Processing Agreement
-- [ISO27001.md](ISO27001.md) — ISO 27001 preparation
-- [SOC2.md](SOC2.md) — SOC2 Type II preparation
-- [AUDIT_CHECKLIST.md](AUDIT_CHECKLIST.md) — Third-party audit checklist
-- [TODO.md](TODO.md) — Project roadmap
-
----
-
-**Last updated**: 2026-08-04 (v3.0.1)
-**License**: MIT (or as specified in LICENSE file)
+我们会尽快确认并修复。

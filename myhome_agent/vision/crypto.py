@@ -58,7 +58,9 @@ def _get_or_create_key() -> bytes:
 
 def _append_to_env(line: str) -> None:
     """追加到项目 .env（如果存在）"""
-    env_path = Path.cwd() / ".env"
+    from ..config import ROOT
+
+    env_path = ROOT / ".env"
     if not env_path.exists():
         return
     with open(env_path, "a", encoding="utf-8") as f:
@@ -123,8 +125,10 @@ def migrate_existing_rtsp_urls(db_path: str | Path) -> int:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    # 1. 加新列
-    cur.execute("ALTER TABLE cameras ADD COLUMN encrypted_rtsp_url TEXT")
+    # 1. 加新列（幂等）
+    existing_cols = {r["name"] for r in cur.execute("PRAGMA table_info(cameras)").fetchall()}
+    if "encrypted_rtsp_url" not in existing_cols:
+        cur.execute("ALTER TABLE cameras ADD COLUMN encrypted_rtsp_url TEXT")
 
     # 2. 加密所有 rtsp_url
     rows = cur.execute("SELECT id, rtsp_url FROM cameras WHERE rtsp_url IS NOT NULL").fetchall()

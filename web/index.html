@@ -566,6 +566,68 @@
             background: var(--accent);
             color: white;
         }
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 16px;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 360px;
+            background: var(--surface);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+        }
+        .login-card h2 {
+            margin: 0 0 14px;
+            font-size: 18px;
+        }
+        .login-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .login-tabs button {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: inherit;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .login-tabs button.active {
+            background: var(--accent);
+            color: white;
+            border-color: transparent;
+        }
+        .login-card input,
+        .login-card select {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: inherit;
+        }
+        .login-card .btn-primary {
+            width: 100%;
+            padding: 10px;
+        }
+        .login-error {
+            color: var(--danger);
+            margin-top: 10px;
+            min-height: 18px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -828,8 +890,37 @@
                 </div>
 
                 <div class="section">
+                    <div class="section-title">账号</div>
+                    <div class="settings-list">
+                        <div class="settings-item" onclick="showLoginOverlay()">
+                            <div class="settings-icon">👤</div>
+                            <div class="settings-label">当前身份</div>
+                            <div class="settings-hint" id="loginStatus">未登录</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                        <div class="settings-item" onclick="logout()">
+                            <div class="settings-icon">🚪</div>
+                            <div class="settings-label">退出登录</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
                     <div class="section-title">安全</div>
                     <div class="settings-list">
+                        <div class="settings-item" onclick="showPendingActions()">
+                            <div class="settings-icon">✅</div>
+                            <div class="settings-label">待确认操作</div>
+                            <div class="settings-hint" id="pendingActionsCount">待确认 0</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
+                        <div class="settings-item" onclick="webAuthnLogin()">
+                            <div class="settings-icon">🔐</div>
+                            <div class="settings-label">安全密钥登录</div>
+                            <div class="settings-hint" id="authStatus">未登录</div>
+                            <div class="settings-arrow">›</div>
+                        </div>
                         <div class="settings-item" onclick="setupWebAuthn()">
                             <div class="settings-icon">🔑</div>
                             <div class="settings-label">安全密钥 / WebAuthn</div>
@@ -963,6 +1054,28 @@
 
         <!-- Toast -->
         <div class="toast" id="toast"></div>
+
+        <!-- 登录遮罩 -->
+        <div class="login-overlay" id="loginOverlay" style="display:none;">
+            <div class="login-card">
+                <h2>登录 myhome-agent</h2>
+                <div class="login-tabs">
+                    <button id="loginTabMember" class="active" onclick="switchLoginTab('member')">成员登录</button>
+                    <button id="loginTabAdmin" onclick="switchLoginTab('admin')">API Token</button>
+                </div>
+                <div id="loginMemberForm">
+                    <select id="loginMemberSelect" style="display:none;"></select>
+                    <input id="loginMemberName" placeholder="成员 ID 或名称" autocomplete="username" style="display:none;" />
+                    <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
+                    <button class="btn-primary" onclick="loginMember()">登录</button>
+                </div>
+                <div id="loginAdminForm" style="display:none;">
+                    <input id="loginApiToken" placeholder="MYHOME_API_TOKEN" autocomplete="off" />
+                    <button class="btn-primary" onclick="loginAdmin()">使用 Token</button>
+                </div>
+                <div class="login-error" id="loginError"></div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -972,11 +1085,212 @@
             currentMember: { id: 1, name: '张爷爷', role: 'elder' },
             elderMode: localStorage.getItem('elderMode') === '1',
             fontSize: localStorage.getItem('fontSize') || 'md',
+            apiToken: localStorage.getItem('apiToken') || '',
+            authToken: localStorage.getItem('webauthn_token') || localStorage.getItem('twofa_token') || '',
+            memberToken: localStorage.getItem('member_token') || '',
+            member: JSON.parse(localStorage.getItem('member') || 'null'),
             ws: null,
             devices: [],
             notifications: [],
             unreadCount: 0,
         };
+
+        function apiFetch(path, options = {}) {
+            const headers = new Headers(options.headers || {});
+            const auth = state.memberToken || state.apiToken;
+            if (auth) headers.set('Authorization', 'Bearer ' + auth);
+            return fetch(path, { ...options, headers });
+        }
+
+        function saveApiToken(token) {
+            state.apiToken = (token || '').trim();
+            if (state.apiToken) localStorage.setItem('apiToken', state.apiToken);
+            else localStorage.removeItem('apiToken');
+        }
+
+        function ensureApiToken() {
+            if (state.apiToken) return;
+            const token = window.prompt('请输入访问令牌（MYHOME_API_TOKEN，见项目 .env 或部署配置）');
+            if (token && token.trim()) saveApiToken(token);
+        }
+
+        function updateAuthStatus() {
+            const el = document.getElementById('authStatus');
+            if (el) el.textContent = state.authToken ? '已登录' : '未登录';
+        }
+
+        function updateLoginStatus() {
+            const el = document.getElementById('loginStatus');
+            if (!el) return;
+            if (state.member) el.textContent = `${state.member.name} (${state.member.role})`;
+            else if (state.apiToken) el.textContent = 'API Token 模式';
+            else el.textContent = '未登录';
+        }
+
+        function showLoginOverlay() {
+            document.getElementById('loginOverlay').style.display = 'flex';
+            document.getElementById('loginError').textContent = '';
+            loadLoginMembers();
+        }
+
+        async function loadLoginMembers() {
+            const select = document.getElementById('loginMemberSelect');
+            const manual = document.getElementById('loginMemberName');
+            try {
+                const r = await fetch('/api/auth/members');
+                const data = await r.json();
+                const members = (data.members || []).filter(m => m && m.id != null && m.name);
+                select.innerHTML = members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+                const lastId = localStorage.getItem('lastMemberId');
+                if (lastId && members.some(m => String(m.id) === lastId)) select.value = lastId;
+                select.style.display = members.length ? 'block' : 'none';
+                manual.style.display = members.length ? 'none' : 'block';
+                if (!members.length) manual.placeholder = '成员 ID 或名称';
+            } catch (e) {
+                select.style.display = 'none';
+                manual.style.display = 'block';
+            }
+        }
+
+        function hideLoginOverlay() {
+            document.getElementById('loginOverlay').style.display = 'none';
+        }
+
+        function switchLoginTab(tab) {
+            const member = tab === 'member';
+            document.getElementById('loginTabMember').classList.toggle('active', member);
+            document.getElementById('loginTabAdmin').classList.toggle('active', !member);
+            document.getElementById('loginMemberForm').style.display = member ? 'block' : 'none';
+            document.getElementById('loginAdminForm').style.display = member ? 'none' : 'block';
+            document.getElementById('loginError').textContent = '';
+        }
+
+        async function loginMember() {
+            const select = document.getElementById('loginMemberSelect');
+            const manual = document.getElementById('loginMemberName');
+            const useSelect = select.style.display !== 'none' && select.options.length > 0;
+            const raw = useSelect ? select.value : manual.value.trim();
+            const password = document.getElementById('loginPassword').value;
+            if (!raw) {
+                document.getElementById('loginError').textContent = '请选择或输入成员';
+                return;
+            }
+            const memberName = useSelect ? select.options[select.selectedIndex].text : raw;
+            const body = /^\d+$/.test(raw) ? { member_id: Number(raw), password } : { name: raw, password };
+            try {
+                const r = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await r.json();
+                if (!data.success) {
+                    document.getElementById('loginError').textContent = data.error || '登录失败';
+                    return;
+                }
+                state.memberToken = data.token;
+                localStorage.setItem('member_token', data.token);
+                state.member = { id: data.member_id, name: memberName, role: data.role };
+                localStorage.setItem('member', JSON.stringify(state.member));
+                localStorage.setItem('lastMemberId', String(data.member_id));
+                state.currentMember = { id: data.member_id, name: memberName, role: data.role };
+                const avatarBtn = document.getElementById('avatarBtn');
+                if (avatarBtn) avatarBtn.textContent = memberName[0];
+                updateGreeting();
+                hideLoginOverlay();
+                updateLoginStatus();
+                updateAuthStatus();
+                loadPendingCount();
+                loadDevices();
+                connectWS();
+                showToast(`✅ 欢迎，${state.member.name}`, 'success');
+            } catch (e) {
+                document.getElementById('loginError').textContent = e.message;
+            }
+        }
+
+        async function loginAdmin() {
+            const token = document.getElementById('loginApiToken').value.trim();
+            if (!token) {
+                document.getElementById('loginError').textContent = '请输入 Token';
+                return;
+            }
+            saveApiToken(token);
+            state.memberToken = '';
+            state.member = null;
+            localStorage.removeItem('member_token');
+            localStorage.removeItem('member');
+            hideLoginOverlay();
+            updateLoginStatus();
+            loadPendingCount();
+            loadDevices();
+            connectWS();
+            showToast('✅ API Token 已保存', 'success');
+        }
+
+        function logout() {
+            saveApiToken('');
+            state.memberToken = '';
+            state.member = null;
+            state.authToken = '';
+            localStorage.removeItem('member_token');
+            localStorage.removeItem('member');
+            localStorage.removeItem('webauthn_token');
+            localStorage.removeItem('twofa_token');
+            updateLoginStatus();
+            updateAuthStatus();
+            showLoginOverlay();
+            if (state.ws) {
+                state.ws.close();
+                state.ws = null;
+            }
+        }
+
+        function initAuth() {
+            updateLoginStatus();
+            updateAuthStatus();
+            if (!state.apiToken && !state.memberToken) {
+                showLoginOverlay();
+                return;
+            }
+            if (state.member) {
+                state.currentMember = { id: state.member.id, name: state.member.name, role: state.member.role };
+                const avatarBtn = document.getElementById('avatarBtn');
+                if (avatarBtn) avatarBtn.textContent = state.member.name[0];
+                updateGreeting();
+            }
+            loadPendingCount();
+            loadDevices();
+            connectWS();
+        }
+
+        function hexToU8(hex) {
+            const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+            const bytes = clean.match(/.{1,2}/g) || [];
+            return Uint8Array.from(bytes.map(b => parseInt(b, 16)));
+        }
+
+        function decodeCredentialOptions(obj) {
+            if (Array.isArray(obj)) return obj.map(decodeCredentialOptions);
+            if (obj && typeof obj === 'object') {
+                const out = {};
+                for (const key of Object.keys(obj)) {
+                    let value = obj[key];
+                    if ((key === 'challenge' || key === 'userHandle') && typeof value === 'string') {
+                        value = hexToU8(value);
+                    } else if (key === 'user' && value && typeof value.id === 'string') {
+                        value = { ...value, id: hexToU8(value.id) };
+                    } else if ((key === 'excludeCredentials' || key === 'allowCredentials') && Array.isArray(value)) {
+                        value = value.map(c => ({ ...c, id: hexToU8(c.id) }));
+                    } else if (typeof value === 'object') {
+                        value = decodeCredentialOptions(value);
+                    }
+                    out[key] = value;
+                }
+                return out;
+            }
+            return obj;
+        }
 
         // ===== 初始化 =====
         document.addEventListener('DOMContentLoaded', () => {
@@ -984,8 +1298,7 @@
             applyFontSize();
             setupRolePicker();
             setupRoomFilter();
-            loadDevices();
-            connectWS();
+            initAuth();
         });
 
         // ===== 老人模式 =====
@@ -1072,7 +1385,7 @@
         // ===== 设备 =====
         async function loadDevices() {
             try {
-                const r = await fetch('/api/devices');
+                const r = await apiFetch('/api/devices');
                 const data = await r.json();
                 state.devices = data.devices || mockDevices();
                 renderDevices('all');
@@ -1127,14 +1440,36 @@
 
         async function controlDevice(id) {
             try {
-                const r = await fetch('/api/devices/' + id + '/toggle', { method: 'POST' });
+                const dev = state.devices.find(d => d.id === id);
+                const isOn = dev && (dev.state.on || dev.state.locked);
+                const needs2fa = dev && ['lock', 'camera', 'gas'].includes(dev.type);
+                const path = needs2fa ? '/api/devices/control/secure' : '/api/devices/control';
+                const headers = { 'Content-Type': 'application/json' };
+                if (needs2fa) headers['X-2FA-Token'] = state.authToken || '';
+                const r = await apiFetch(path, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ device_id: id, action: isOn ? 'off' : 'on' }),
+                });
+                if (r.status === 401) {
+                    const err = await r.json().catch(() => ({}));
+                    if (err.requires_2fa || err.error === 'requires 2FA') {
+                        showToast('🔐 请先使用安全密钥登录', 'error');
+                        webAuthnLogin();
+                    } else {
+                        showToast('🔐 登录已失效，请重新登录', 'error');
+                        showLoginOverlay();
+                    }
+                    return;
+                }
                 if (r.ok) {
                     const data = await r.json();
-                    const dev = state.devices.find(d => d.id === id);
-                    if (dev) {
+                    if (data.success && dev) {
                         if (dev.type === 'lock') dev.state.locked = !dev.state.locked;
                         else dev.state.on = !dev.state.on;
                         renderDevices('all');
+                    } else {
+                        showToast((data.error || '控制失败') + '（mock 模式）', 'error');
                     }
                 }
             } catch (e) {
@@ -1145,16 +1480,19 @@
         // ===== 场景 =====
         async function runScene(name) {
             try {
-                const r = await fetch('/api/scenes/run', {
+                const r = await apiFetch('/api/scenes/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name }),
                 });
-                if (r.ok || true) {
+                const data = await r.json();
+                if (r.ok && data.success) {
                     showToast(`✓ ${name} 场景执行成功`, 'success');
+                } else {
+                    showToast(`❌ ${name}: ${data.error || '执行失败'}`, 'error');
                 }
             } catch (e) {
-                showToast(`✓ ${name}（mock 执行）`, 'success');
+                showToast(`❌ ${name}: ${e.message}`, 'error');
             }
         }
 
@@ -1199,24 +1537,48 @@
         // ===== 隐私 toggle =====
         async function toggleVision(on) {
             try {
-                await fetch('/api/privacy/vision', {
+                const r = await apiFetch('/api/privacy/vision', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled: on })
                 });
-            } catch (e) {}
-            showToast(on ? '👁️ 视觉分析已开启' : '已关闭', on ? 'success' : '');
+                const data = await r.json();
+                showToast(
+                    data.success ? (on ? '👁️ 视觉分析已开启' : '视觉分析已关闭') : '❌ 设置失败',
+                    data.success ? 'success' : 'error'
+                );
+            } catch (e) {
+                showToast('❌ 视觉设置失败: ' + e.message, 'error');
+            }
         }
         async function toggleLLM(on) {
             try {
-                await fetch('/api/privacy/llm', {
+                const r = await apiFetch('/api/privacy/llm', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled: on })
                 });
-            } catch (e) {}
-            showToast(on ? '🤖 LLM 兜底已开启' : '已关闭', on ? 'success' : '');
+                const data = await r.json();
+                showToast(
+                    data.success ? (on ? '🤖 LLM 兜底已开启' : 'LLM 兜底已关闭') : '❌ 设置失败',
+                    data.success ? 'success' : 'error'
+                );
+            } catch (e) {
+                showToast('❌ LLM 设置失败: ' + e.message, 'error');
+            }
         }
         async function toggleRemote(on) {
-            showToast(on ? '🌐 远程控制已开启' : '已关闭', on ? 'success' : '');
+            try {
+                const r = await apiFetch('/api/privacy/remote', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: on })
+                });
+                const data = await r.json();
+                showToast(
+                    data.success ? (on ? '🌐 远程控制已开启' : '远程控制已关闭') : '❌ 设置失败',
+                    data.success ? 'success' : 'error'
+                );
+            } catch (e) {
+                showToast('❌ 远程设置失败: ' + e.message, 'error');
+            }
         }
 
         // ===== WebAuthn / TOTP 设置 =====
@@ -1240,38 +1602,21 @@
             }
             try {
                 showToast('🔑 正在注册安全密钥...', 'success');
-                const start = await fetch('/api/auth/webauthn/register/start?member_id=' + state.currentMember.id, {
-                    method: 'POST'
+                const start = await apiFetch('/api/auth/webauthn/register/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ member_id: state.currentMember.id }),
                 });
                 const data = await start.json();
-                if (!data.challenge_id) {
-                    showToast('❌ 后端未返回 challenge', 'error');
+                if (!data.challenge_id || !data.options) {
+                    showToast('❌ ' + (data.error || '后端未返回 challenge'), 'error');
                     return;
                 }
-                const challenge = Uint8Array.from(atob(data.challenge_b64), c => c.charCodeAt(0));
-                const options = {
-                    challenge,
-                    rp: { id: data.rp_id, name: data.rp_name },
-                    user: {
-                        id: Uint8Array.from(atob(data.user_id_b64), c => c.charCodeAt(0)),
-                        name: data.user_name,
-                        displayName: data.user_name,
-                    },
-                    pubKeyCredParams: [
-                        { type: 'public-key', alg: -7 },  // ES256
-                        { type: 'public-key', alg: -257 }, // RS256
-                    ],
-                    authenticatorSelection: {
-                        userVerification: 'preferred',
-                        residentKey: 'preferred',
-                    },
-                    timeout: 60000,
-                    attestation: 'direct',
-                };
+                const options = decodeCredentialOptions(data.options);
                 const credential = await navigator.credentials.create({
                     publicKey: options,
                 });
-                const finish = await fetch('/api/auth/webauthn/register/finish', {
+                const finish = await apiFetch('/api/auth/webauthn/register/finish', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1279,16 +1624,21 @@
                         attestation: {
                             id: credential.id,
                             rawId: Array.from(new Uint8Array(credential.rawId)),
+                            type: credential.type || 'public-key',
                             clientDataJSON: Array.from(new Uint8Array(credential.response.clientDataJSON)),
                             attestationObject: Array.from(new Uint8Array(credential.response.attestationObject)),
                         },
-                        name: 'My Phone',
+                        name: 'Default Key',
                     }),
                 });
                 const result = await finish.json();
                 if (result.success) {
                     showToast('✓ 安全密钥注册成功', 'success');
-                    localStorage.setItem('webauthn_token', result.token);
+                    if (result.token) {
+                        state.authToken = result.token;
+                        localStorage.setItem('webauthn_token', result.token);
+                        updateAuthStatus();
+                    }
                     closeModal();
                 } else {
                     showToast('❌ 注册失败: ' + (result.error || '未知'), 'error');
@@ -1299,27 +1649,181 @@
             }
         }
 
-        function setupTOTP() {
-            showModal('启用两步验证 (TOTP)', `
-                <p style="margin-bottom:12px;">用 Google Authenticator / 微软 Authenticator 扫描二维码。</p>
-                <div style="background:white;padding:20px;border-radius:8px;text-align:center;">
-                    <div style="font-family:monospace;font-size:12px;">[ 二维码占位 ]</div>
-                </div>
-                <div style="margin-top:12px;font-family:monospace;font-size:13px;background:var(--surface-2);padding:8px;border-radius:6px;text-align:center;">
-                    JBSWY3DPEHPK3PXP
-                </div>
-            `, [
-                { text: '取消', class: 'btn-secondary', onclick: 'closeModal()' },
-                { text: '✓ 已扫描', class: 'btn-primary', onclick: 'closeModal();showToast("TOTP 已启用","success")' },
+        async function webAuthnLogin() {
+            if (typeof navigator.credentials === 'undefined' || !navigator.credentials.get) {
+                showToast('❌ 浏览器不支持 WebAuthn', 'error');
+                return;
+            }
+            try {
+                showToast('🔐 正在验证安全密钥...', 'success');
+                const start = await apiFetch('/api/auth/webauthn/login/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ member_id: state.currentMember.id }),
+                });
+                const data = await start.json();
+                if (!data.challenge_id || !data.options) {
+                    showToast('❌ ' + (data.error || '后端未返回 challenge'), 'error');
+                    return;
+                }
+                const options = decodeCredentialOptions(data.options);
+                const assertion = await navigator.credentials.get({ publicKey: options });
+                const finish = await apiFetch('/api/auth/webauthn/login/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        challenge_id: data.challenge_id,
+                        assertion: {
+                            id: assertion.id,
+                            rawId: Array.from(new Uint8Array(assertion.rawId)),
+                            type: assertion.type || 'public-key',
+                            clientDataJSON: Array.from(new Uint8Array(assertion.response.clientDataJSON)),
+                            authenticatorData: Array.from(new Uint8Array(assertion.response.authenticatorData)),
+                            signature: Array.from(new Uint8Array(assertion.response.signature)),
+                            userHandle: assertion.response.userHandle
+                                ? Array.from(new Uint8Array(assertion.response.userHandle))
+                                : '',
+                        },
+                    }),
+                });
+                const result = await finish.json();
+                if (result.success && result.token) {
+                    state.authToken = result.token;
+                    localStorage.setItem('webauthn_token', result.token);
+                    updateAuthStatus();
+                    showToast('✅ 安全密钥登录成功', 'success');
+                } else {
+                    showToast('❌ 登录失败: ' + (result.error || '未知'), 'error');
+                }
+            } catch (e) {
+                showToast('❌ WebAuthn 登录错误: ' + e.message, 'error');
+                console.error('WebAuthn login:', e);
+            }
+        }
+
+        async function setupTOTP() {
+            try {
+                const r = await apiFetch('/api/auth/2fa/setup/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ member_id: state.currentMember.id }),
+                });
+                const data = await r.json();
+                if (!data.challenge_id) {
+                    showToast('❌ 启动 2FA 失败: ' + (data.error || '未知'), 'error');
+                    return;
+                }
+                showModal('启用两步验证 (TOTP)', `
+                    <p style="margin-bottom:12px;">请用 Google Authenticator / 微软 Authenticator 扫码或手动输入密钥。</p>
+                    <div style="background:var(--surface-2);padding:12px;border-radius:8px;text-align:center;font-family:monospace;">
+                        ${data.secret_plain || ''}
+                    </div>
+                    <p style="margin-top:12px;">备用码（仅显示一次，请保存）：</p>
+                    <div style="background:var(--surface-2);padding:10px;border-radius:8px;font-family:monospace;font-size:13px;line-height:1.7;">
+                        ${(data.backup_codes_plain || []).join('<br>')}
+                    </div>
+                    <input id="totpCode" placeholder="输入 6 位验证码" style="width:100%;margin-top:12px;padding:10px;" />
+                `, [
+                    { text: '取消', class: 'btn-secondary', onclick: 'closeModal()' },
+                    { text: '✅ 确认启用', class: 'btn-primary', onclick: "confirmTOTP('" + data.challenge_id + "')" },
+                ]);
+            } catch (e) {
+                showToast('❌ 2FA 设置失败: ' + e.message, 'error');
+            }
+        }
+
+        async function confirmTOTP(challengeId) {
+            const code = (document.getElementById('totpCode').value || '').trim();
+            if (!code) {
+                showToast('请输入验证码', 'error');
+                return;
+            }
+            try {
+                const r = await apiFetch('/api/auth/2fa/setup/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ challenge_id: challengeId, code }),
+                });
+                const data = await r.json();
+                if (data.success) {
+                    closeModal();
+                    showToast('✅ 2FA 已启用', 'success');
+                } else {
+                    showToast('❌ ' + (data.error || '启用失败'), 'error');
+                }
+            } catch (e) {
+                showToast('❌ 2FA 启用失败: ' + e.message, 'error');
+            }
+        }
+
+        // ===== 待确认操作 =====
+        async function loadPendingCount() {
+            try {
+                const r = await apiFetch('/api/actions/pending');
+                const data = await r.json();
+                const el = document.getElementById('pendingActionsCount');
+                if (el) el.textContent = `待确认 ${data.total || 0}`;
+            } catch (e) {}
+        }
+
+        async function showPendingActions() {
+            const r = await apiFetch('/api/actions/pending');
+            const data = await r.json();
+            const actions = data.actions || [];
+            if (!actions.length) {
+                showToast('暂无待确认操作', 'success');
+                return;
+            }
+            const body = actions.map(a => `
+                <div style="border-bottom:1px solid var(--border);padding:10px 0;">
+                    <div><b>${a.device_id}</b> → ${a.action}</div>
+                    <div style="font-size:12px;color:var(--text-dim);">
+                        规则: ${a.rule_id} · 过期: ${new Date(a.expires_at * 1000).toLocaleString()}
+                    </div>
+                    <div style="margin-top:8px;">
+                        <button class="btn-primary" style="margin-right:8px;" onclick="confirmPendingAction('${a.token}')">确认</button>
+                        <button class="btn-secondary" onclick="cancelPendingAction('${a.token}')">取消</button>
+                    </div>
+                </div>`).join('');
+            showModal('待确认操作', body, [
+                { text: '关闭', class: 'btn-secondary', onclick: 'closeModal();loadPendingCount()' },
             ]);
+        }
+
+        async function confirmPendingAction(token) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (state.authToken) headers['X-2FA-Token'] = state.authToken;
+            const r = await apiFetch(`/api/actions/${token}/confirm`, { method: 'POST', headers });
+            const data = await r.json().catch(() => ({}));
+            if (r.status === 401 && (data.requires_2fa || data.error === 'requires 2FA')) {
+                showToast('🔐 请先使用安全密钥登录', 'error');
+                webAuthnLogin();
+                return;
+            }
+            if (r.ok && data.success) showToast('✅ 已确认执行', 'success');
+            else showToast('❌ ' + (data.error || '确认失败'), 'error');
+            showPendingActions();
+        }
+
+        async function cancelPendingAction(token) {
+            const r = await apiFetch(`/api/actions/${token}/cancel`, { method: 'POST' });
+            const data = await r.json().catch(() => ({}));
+            showToast(
+                r.ok && data.success ? '已取消' : '❌ ' + (data.error || '取消失败'),
+                r.ok && data.success ? 'success' : 'error'
+            );
+            showPendingActions();
         }
 
         // ===== 数据 =====
         async function exportData() {
             try {
-                const r = await fetch('/api/members/' + state.currentMember.id + '/data');
-                const blob = await r.blob();
-                triggerDownload(blob, `myhome-agent-export-${state.currentMember.id}.json`);
+                const r = await apiFetch('/api/households/1/export');
+                const data = await r.json();
+                triggerDownload(
+                    new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+                    `myhome-agent-export-${state.currentMember.id}.json`
+                );
             } catch (e) {
                 triggerDownload(new Blob([JSON.stringify({export: 'mock', member: state.currentMember})]), `myhome-agent-export-${state.currentMember.id}.json`);
             }
@@ -1465,7 +1969,9 @@
         // ===== WebSocket =====
         function connectWS() {
             try {
-                state.ws = new WebSocket(`ws://${location.host}/ws/events`);
+                const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+                const token = encodeURIComponent(state.memberToken || state.apiToken || '');
+                state.ws = new WebSocket(`${proto}${location.host}/ws/events?token=${token}`);
                 state.ws.onmessage = (e) => {
                     try {
                         const data = JSON.parse(e.data);
@@ -1478,7 +1984,9 @@
                         }
                     } catch (err) {}
                 };
-                state.ws.onclose = () => setTimeout(connectWS, 3000);
+                state.ws.onclose = () => {
+                    if (state.memberToken || state.apiToken) setTimeout(connectWS, 3000);
+                };
             } catch (e) {}
         }
 

@@ -151,9 +151,13 @@ class WebAuthnManager:
             logger.error(f"WebAuthn 注册验证失败: {e}")
             return {"success": False, "error": f"验证失败: {e}"}
 
-        credential_id_b64 = json.dumps(
-            credential_response.get("id") or credential_response.get("rawId")
-        )
+        if hasattr(credential_response, "id"):
+            credential_id = credential_response.id
+            transports = list(getattr(credential_response, "transports", []) or [])
+        else:
+            credential_id = credential_response.get("id") or credential_response.get("rawId")
+            transports = credential_response.get("transports", [])
+        credential_id_b64 = json.dumps(credential_id)
         public_key = (
             verification.credential_public_key.hex()
             if hasattr(verification.credential_public_key, "hex")
@@ -172,7 +176,7 @@ class WebAuthnManager:
                         pending["member_id"],
                         public_key,
                         sign_count,
-                        json.dumps(credential_response.get("transports", [])),
+                        json.dumps(transports),
                         nickname or "Default Key",
                         int(time.time()),
                     ),
@@ -199,10 +203,17 @@ class WebAuthnManager:
         if not creds:
             return {"success": False, "error": "该 member 未注册 WebAuthn"}
 
-        allow_credentials = [
-            PublicKeyCredentialDescriptor(id=cred["credential_id"].encode())
-            for cred in creds
-        ]
+        allow_credentials = []
+        for cred in creds:
+            try:
+                stored_id = json.loads(cred["credential_id"])
+            except (json.JSONDecodeError, TypeError):
+                stored_id = cred["credential_id"]
+            allow_credentials.append(
+                PublicKeyCredentialDescriptor(
+                    id=stored_id.encode() if isinstance(stored_id, str) else bytes(stored_id)
+                )
+            )
 
         challenge = secrets.token_bytes(32)
         options = generate_authentication_options(
@@ -235,7 +246,10 @@ class WebAuthnManager:
         if time.time() - pending["created_at"] > CHALLENGE_TTL:
             return {"success": False, "error": "challenge 过期"}
 
-        credential_id_b64 = assertion_response.get("id") or assertion_response.get("rawId")
+        if hasattr(assertion_response, "id"):
+            credential_id_b64 = assertion_response.id
+        else:
+            credential_id_b64 = assertion_response.get("id") or assertion_response.get("rawId")
 
         with self.store._conn() as c:
             cred = c.execute(

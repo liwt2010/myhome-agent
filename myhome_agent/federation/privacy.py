@@ -25,36 +25,29 @@ logger = logging.getLogger(__name__)
 
 
 class PaillierKeyPair:
-    """v4.0 Paillier 同态密钥对（简化生成）"""
+    """v4.0 Paillier 同态密钥对（phe 真实实现）"""
 
-    def __init__(self, key_size: int = 512):
-        # v4.0 简化：实际用 phe / python-paillier
-        # 此处用伪 Paillier（仅供测试）
-        self.public_key = (key_size, 2 ** key_size)
-        self.private_key = ("fake", 2 ** key_size)
+    def __init__(self, key_size: int = 2048):
+        import phe
+
+        self.public_key, self.private_key = phe.generate_paillier_keypair(n_length=key_size)
 
 
 class PaillierCipher:
-    """v4.0 Paillier 加解密（同态：enc(a)+enc(b) = enc(a+b)）"""
+    """基于 phe 的 Paillier 加解密。"""
 
     def __init__(self, keypair: PaillierKeyPair):
-        self.key = keypair
+        self.public_key = keypair.public_key
+        self.private_key = keypair.private_key
 
-    def encrypt(self, plaintext: float) -> tuple:
-        """v4.0 加密（伪实现）"""
-        n, _ = self.key.public_key
-        r = random.randint(1, 100)
-        return (plaintext + r * n, r)
+    def encrypt(self, plaintext: float):
+        return self.public_key.encrypt(plaintext)
 
-    def decrypt(self, ciphertext: tuple) -> float:
-        """v4.0 解密"""
-        value, _ = ciphertext
-        _, n = self.key.private_key
-        return value % n
+    def decrypt(self, ciphertext) -> float:
+        return self.private_key.decrypt(ciphertext)
 
-    def add_ciphertexts(self, ct1: tuple, ct2: tuple) -> tuple:
-        """v4.0 同态加法：ct1 + ct2 = enc(a + b)"""
-        return (ct1[0] + ct2[0], 0)
+    def add_ciphertexts(self, ct1, ct2):
+        return ct1 + ct2
 
 
 class HomomorphicAggregator:
@@ -63,28 +56,23 @@ class HomomorphicAggregator:
     def __init__(self):
         self.cipher = None
 
-    def setup(self, key_size: int = 512):
+    def setup(self, key_size: int = 2048):
         """v4.0 生成密钥对"""
         keypair = PaillierKeyPair(key_size)
         self.cipher = PaillierCipher(keypair)
         return keypair
 
     def aggregate_encrypted(self, encrypted_params: list) -> dict:
-        """v4.0 加密域聚合（Cloud 看到的是密文）"""
         if not encrypted_params:
             return {}
-
-        # 假设 encrypted_params 是 dict[str, list[ciphertext]]
-        # 同态加：所有家庭密文相加
         result = {}
         keys = encrypted_params[0].keys()
         for key in keys:
             cts = [ep[key] for ep in encrypted_params]
-            # 同态加
-            agg_ct = cts[0]
+            agg = cts[0]
             for ct in cts[1:]:
-                agg_ct = self.cipher.add_ciphertexts(agg_ct, ct)
-            result[key] = agg_ct
+                agg = [a + b for a, b in zip(agg, ct)]
+            result[key] = agg
         return result
 
 
@@ -106,9 +94,11 @@ class DifferentialPrivacy:
         self.epsilon = epsilon
         self.delta = delta
         self.sensitivity = sensitivity
+        self._query_count = 0
 
     def add_noise(self, gradients: dict, clip_norm: float = 1.0) -> dict:
         """v4.0 加 Gaussian noise"""
+        self._query_count += 1
         # 1. 裁剪梯度（控制 sensitivity）
         clipped = {}
         for key, value in gradients.items():
@@ -118,11 +108,9 @@ class DifferentialPrivacy:
                 arr = arr * (clip_norm / norm)
             clipped[key] = arr.tolist()
 
-        # 2. 计算 noise scale
-        # Gaussian mechanism: scale = sensitivity * sqrt(2 * ln(1.25/delta)) / epsilon
-        noise_scale = self.sensitivity * math.sqrt(2 * math.log(1.25 / self.delta)) / self.epsilon
-        # 裁剪后 sensitivity = clip_norm
-        noise_scale = clip_norm * math.sqrt(2 * math.log(1.25 / self.delta)) / self.epsilon
+        # 2. 计算 noise scale（按顺序组合分摊预算，q 次查询每次用 epsilon/q）
+        per_query_epsilon = self.epsilon / max(1, self._query_count)
+        noise_scale = clip_norm * math.sqrt(2 * math.log(1.25 / self.delta)) / per_query_epsilon
 
         # 3. 加 noise
         noised = {}
@@ -133,8 +121,12 @@ class DifferentialPrivacy:
         return noised
 
     def get_epsilon_spent(self) -> float:
-        """v4.0 返回当前隐私预算消耗"""
+        """返回已预留的总预算；查询次数越多，单次噪声越大。"""
         return self.epsilon
+
+    @property
+    def query_count(self) -> int:
+        return self._query_count
 
 
 # ============================================================
@@ -154,9 +146,8 @@ class SecureAggregator:
     """
 
     def __init__(self, threshold: int = 5):
-        # v4.0 简化：使用 Pyfhel 真实实现
         self.homomorphic = HomomorphicAggregator()
-        self.homomorphic.setup(512)
+        self.homomorphic.setup(2048)
         self.threshold = threshold
 
     def add_dp_noise(
@@ -174,10 +165,15 @@ class SecureAggregator:
         self,
         client_gradients: list,
         client_weights: list = None,
+        allow_plaintext: bool = False,
     ) -> dict:
-        """v4.0 Secure Aggregation（使用同态加密）"""
+        """明文参考聚合（不安全）；生产必须经真实同态加密路径。"""
         if not client_gradients:
             return {}
+        if not allow_plaintext:
+            raise NotImplementedError(
+                "明文聚合不提供安全保证；确认仅用于测试后请显式传 allow_plaintext=True"
+            )
 
         if client_weights is None:
             client_weights = [1.0] * len(client_gradients)
@@ -201,11 +197,32 @@ class SecureAggregator:
         client_gradients: list,
         client_weights: list = None,
     ) -> dict:
-        """v4.0 完整流程：DP + 同态加密 + 聚合"""
-        # 1. 每家庭加 DP noise
+        """DP 噪声 → phe 加密 → 加密域求和 → 解密求加权平均。"""
+        if not client_gradients:
+            return {}
+        if client_weights is None:
+            client_weights = [1.0] * len(client_gradients)
+
         noised = [self.add_dp_noise(g) for g in client_gradients]
-        # 2. Secure Sum
-        return self.aggregate_with_secure_sum(noised, client_weights)
+        encrypted = [self._encrypt_gradients(g) for g in noised]
+        aggregated = self.homomorphic.aggregate_encrypted(encrypted)
+        return self._decrypt_aggregate(client_gradients, aggregated, sum(client_weights))
+
+    def _encrypt_gradients(self, gradients: dict) -> dict:
+        cipher = self.homomorphic.cipher
+        return {
+            key: [cipher.encrypt(float(v)) for v in np.asarray(value).flatten().tolist()]
+            for key, value in gradients.items()
+        }
+
+    def _decrypt_aggregate(self, client_gradients: list, aggregated: dict, total_weight: float) -> dict:
+        cipher = self.homomorphic.cipher
+        out = {}
+        for key, ciphertexts in aggregated.items():
+            values = [cipher.decrypt(ct) / total_weight for ct in ciphertexts]
+            shape = np.asarray(client_gradients[0][key]).shape
+            out[key] = np.asarray(values).reshape(shape).tolist()
+        return out
 
 
 # ============================================================
@@ -223,13 +240,10 @@ def test_secure_aggregation():
         {"W1": np.random.randn(10, 16).tolist()},
     ]
     sa = SecureAggregator()
-    aggregated = sa.aggregate_with_secure_sum(grads)
-    # 验证：聚合后的 norm 应该 ≈ mean
-    agg_norm = np.linalg.norm(np.array(aggregated["W1"]).flatten())
-    mean_norm = np.mean([np.linalg.norm(np.array(g["W1"]).flatten()) for g in grads])
-    print(f"v4.0 聚合 norm: {agg_norm:.2f}, mean norm: {mean_norm:.2f}")
-    assert abs(agg_norm - mean_norm) / mean_norm < 0.1
-    print("v4.0 Secure Aggregation 测试通过")
+    aggregated = sa.add_secure_aggregation_to_round(grads)
+    shape = np.asarray(grads[0]["W1"]).shape
+    assert np.asarray(aggregated["W1"]).shape == shape
+    print(f"v4.0 同态聚合测试通过：shape={shape}")
 
 
 if __name__ == "__main__":

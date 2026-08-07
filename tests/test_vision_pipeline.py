@@ -77,7 +77,6 @@ def tmp_db():
 def vision_store(tmp_db):
     store = VisionStore(tmp_db)
     yield store
-    store._conn().close()
 
 
 @pytest.fixture

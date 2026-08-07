@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -38,7 +39,8 @@ class A2AMessage:
 
     def sign(self, private_key: str) -> str:
         content = json.dumps({
-            "from": self.from_agent, "to": self.to_agent, "ts": self.timestamp,
+            "from": self.from_agent, "to": self.to_agent,
+            "message_id": self.message_id, "ts": self.timestamp,
             "type": self.type, "payload": self.payload,
         }, sort_keys=True, ensure_ascii=False)
         self.signature = hmac.new(
@@ -47,7 +49,14 @@ class A2AMessage:
         return self.signature
 
     def verify(self, private_key: str) -> bool:
-        expected = self.sign(private_key)
+        content = json.dumps({
+            "from": self.from_agent, "to": self.to_agent,
+            "message_id": self.message_id, "ts": self.timestamp,
+            "type": self.type, "payload": self.payload,
+        }, sort_keys=True, ensure_ascii=False)
+        expected = hmac.new(
+            private_key.encode(), content.encode(), hashlib.sha256
+        ).hexdigest()[:32]
         return hmac.compare_digest(expected, self.signature)
 
     def to_dict(self) -> dict:
@@ -80,9 +89,11 @@ class A2AMessage:
 class A2AClient:
     """v4.1 A2A 客户端 SDK（每个 myhome-agent 实例 1 个）"""
 
-    def __init__(self, agent_id: str, private_key: str = "myhome-agent-key"):
+    def __init__(self, agent_id: str, private_key: str | None = None):
         self.agent_id = agent_id
-        self.private_key = private_key
+        self.private_key = private_key or os.getenv("MYHOME_A2A_SECRET", "")
+        if not self.private_key:
+            raise ValueError("MYHOME_A2A_SECRET 未配置，A2A 客户端拒绝启动")
 
     def send_task_request(
         self, target_url: str, to_agent: str, task: str, args: dict,
@@ -163,10 +174,13 @@ class A2AServer:
         app.include_router(server.router)
     """
 
-    def __init__(self, agent_id: str, private_key: str = "myhome-agent-key"):
+    def __init__(self, agent_id: str, private_key: str | None = None):
         self.agent_id = agent_id
-        self.private_key = private_key
+        self.private_key = private_key or os.getenv("MYHOME_A2A_SECRET", "")
+        if not self.private_key:
+            raise ValueError("MYHOME_A2A_SECRET 未配置，A2A 服务端拒绝启动")
         self._handlers: dict[str, list] = {}
+        self._seen_messages: dict[str, float] = {}
         # WebSocket 通道
         self._ws_clients: dict[str, Any] = {}
 
@@ -181,11 +195,29 @@ class A2AServer:
         """v4.1 主处理入口"""
         msg = A2AMessage.from_dict(raw)
 
-        # 1. 验签
+        # 1. 基础校验：密钥、路由、时间窗口、重放
+        if not self.private_key:
+            return {"status": "auth_failed", "message": "A2A 密钥未配置"}
+        if not msg.from_agent or not msg.to_agent:
+            return {"status": "auth_failed", "message": "缺少 from_agent/to_agent"}
+        if msg.to_agent != self.agent_id:
+            return {"status": "auth_failed", "message": "目标 agent 不匹配"}
+        if abs(time.time() - msg.timestamp) > 300:
+            return {"status": "auth_failed", "message": "消息时间戳超窗"}
+        if msg.message_id in self._seen_messages:
+            return {"status": "auth_failed", "message": "消息重放"}
+
+        # 2. 验签
         if not msg.verify(self.private_key):
             return {"status": "auth_failed", "message": "签名验证失败"}
 
-        # 2. 路由到处理器
+        # 3. 记录已见消息，并清理过期缓存
+        self._seen_messages[msg.message_id] = time.time()
+        cutoff = time.time() - 600
+        for mid in [m for m, ts in self._seen_messages.items() if ts < cutoff]:
+            self._seen_messages.pop(mid, None)
+
+        # 4. 路由到处理器
         handlers = self._handlers.get(msg.type, [])
         results = []
         for handler in handlers:

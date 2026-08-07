@@ -74,6 +74,8 @@ class MultiCameraScheduler:
         max_workers: int = 4,
         cpu_overload_threshold: float = 0.8,
         degrade_fps: int = 3,
+        alert_store: Any | None = None,
+        notifier: Any | None = None,
     ):
         self.store = store
         self.fps = fps
@@ -81,6 +83,8 @@ class MultiCameraScheduler:
         self.max_workers = max_workers
         self.cpu_overload_threshold = cpu_overload_threshold
         self.degrade_fps = degrade_fps
+        self.alert_store = alert_store
+        self.notifier = notifier
 
         self._pipelines: dict[str, VisionPipeline] = {}
         self._sources: dict[str, CameraSource] = {}
@@ -108,6 +112,8 @@ class MultiCameraScheduler:
                 source=source,
                 detectors=detectors,
                 fps=self.current_fps,
+                alert_store=self.alert_store,
+                notifier=self.notifier,
             )
             self._pipelines[camera_id] = pipeline
             self._stats.cameras[camera_id] = CameraStats(camera_id=camera_id)
@@ -260,6 +266,8 @@ def build_scheduler_from_store(
     *,
     fps: int = 5,
     max_workers: int = 4,
+    alert_store: Any | None = None,
+    notifier: Any | None = None,
 ) -> MultiCameraScheduler:
     """从 VisionStore 加载所有摄像头并构建 scheduler
 
@@ -270,7 +278,13 @@ def build_scheduler_from_store(
     """
     from .detectors import PersonDetector, MotionDetector, FireDetector
 
-    scheduler = MultiCameraScheduler(store, fps=fps, max_workers=max_workers)
+    scheduler = MultiCameraScheduler(
+        store,
+        fps=fps,
+        max_workers=max_workers,
+        alert_store=alert_store,
+        notifier=notifier,
+    )
     cameras = store.list_cameras(household_id=1)
 
     for cam in cameras:

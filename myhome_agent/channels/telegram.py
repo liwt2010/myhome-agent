@@ -48,10 +48,18 @@ class TelegramBot:
         self.token = token
         self.agent = agent
         self.store = store
+        raw_allowed = os.getenv("MYHOME_TELEGRAM_ALLOWED_CHAT_IDS", "")
+        self.allowed_chat_ids = {
+            int(x.strip()) for x in raw_allowed.split(",") if x.strip().lstrip("-").isdigit()
+        }
         self._application = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._running = False
+
+    def _authorized(self, update) -> bool:
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        return chat_id is not None and chat_id in self.allowed_chat_ids
 
     def start(self) -> None:
         """后台线程启动 bot"""
@@ -117,6 +125,9 @@ class TelegramBot:
 
     async def _cmd_bind(self, update, context):
         """绑定 chat_id 到 member"""
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         args = context.args
         if not args:
             await update.message.reply_text("用法：/bind <你的名字>")
@@ -143,6 +154,9 @@ class TelegramBot:
 
     async def _cmd_chat(self, update, context):
         """与 Agent 对话"""
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         msg = " ".join(context.args) if context.args else ""
         if not msg:
             await update.message.reply_text("用法：/chat <消息>")
@@ -159,6 +173,9 @@ class TelegramBot:
 
     async def _cmd_status(self, update, context):
         """家庭状态"""
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         if self.store is None:
             await update.message.reply_text("❌ store 未配置")
             return
@@ -183,6 +200,9 @@ class TelegramBot:
 
     async def _cmd_rules(self, update, context):
         """规则列表"""
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         if self.store is None:
             await update.message.reply_text("❌ store 未配置")
             return
@@ -202,6 +222,9 @@ class TelegramBot:
 
     async def _cmd_devices(self, update, context):
         """设备列表"""
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         if self.store is None:
             await update.message.reply_text("❌ store 未配置")
             return
@@ -220,6 +243,9 @@ class TelegramBot:
 
     async def _cmd_alerts(self, update, context):
         """告警列表"""
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         if self.store is None:
             await update.message.reply_text("❌ store 未配置")
             return
@@ -240,6 +266,9 @@ class TelegramBot:
 
         v0.5.2 群组支持：群组中 @bot 触发；reply_to_message 识别提问人
         """
+        if not self._authorized(update):
+            await update.message.reply_text("❌ 未授权：请在 .env 配置 MYHOME_TELEGRAM_ALLOWED_CHAT_IDS")
+            return
         if self.agent is None:
             await update.message.reply_text("请先 /bind 身份")
             return
@@ -280,22 +309,21 @@ class TelegramBot:
         return None
 
     def _save_chat_id(self, member_id: int, chat_id: int) -> None:
-        """保存 chat_id 到 member 行（v0.5 用现有 members 表的 notification_prefs JSON 字段）"""
+        """保存 chat_id 到 members.preferences JSON 字段"""
         if self.store is None:
             return
         try:
             with self.store._conn() as c:
-                # v0.5 简化：用 chat_id 列（如果存在）；否则进 notification_prefs JSON
                 row = c.execute(
-                    "SELECT notification_prefs FROM members WHERE id = ?", (member_id,)
+                    "SELECT preferences FROM members WHERE id = ?", (member_id,)
                 ).fetchone()
                 if row:
-                    prefs = json.loads(row['notification_prefs'] or '{}')
+                    prefs = json.loads(row['preferences'] or '{}')
                 else:
                     prefs = {}
                 prefs['telegram_chat_id'] = chat_id
                 c.execute(
-                    "UPDATE members SET notification_prefs = ? WHERE id = ?",
+                    "UPDATE members SET preferences = ? WHERE id = ?",
                     (json.dumps(prefs, ensure_ascii=False), member_id),
                 )
         except Exception as e:

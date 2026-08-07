@@ -14,6 +14,7 @@ with open(ROOT / "config" / "default.yaml", encoding="utf-8") as f:
     CONFIG: dict = yaml.safe_load(f) or {}
 
 DB_PATH = os.getenv("MYHOME_DB_PATH", str(ROOT / "data" / "myhome.db"))
+SNAPSHOT_DIR = os.getenv("MYHOME_SNAPSHOT_DIR", str(ROOT / "data" / "snapshots"))
 HOST = os.getenv("MYHOME_HOST", "0.0.0.0")
 PORT = int(os.getenv("MYHOME_PORT", "8300"))
 

@@ -7,12 +7,57 @@
 """
 from __future__ import annotations
 
+import ast
 import logging
 from datetime import datetime, timedelta
 
 from ..memory.store import Store
 
 logger = logging.getLogger(__name__)
+
+
+# 硬规则条件只允许访问 value/hour 两个变量，且仅限比较/布尔/常量表达式
+_ALLOWED_NAMES = frozenset({"value", "hour"})
+
+
+def _validate_condition(node: ast.AST) -> None:
+    if isinstance(node, ast.Expression):
+        _validate_condition(node.body)
+        return
+    if isinstance(node, ast.Constant):
+        return
+    if isinstance(node, ast.Name):
+        if node.id not in _ALLOWED_NAMES:
+            raise ValueError(f"disallowed name: {node.id}")
+        return
+    if isinstance(node, ast.Compare):
+        _validate_condition(node.left)
+        for comparator in node.comparators:
+            _validate_condition(comparator)
+        for op in node.ops:
+            if not isinstance(op, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn)):
+                raise ValueError(f"disallowed operator: {type(op).__name__}")
+        return
+    if isinstance(node, ast.BoolOp):
+        for value in node.values:
+            _validate_condition(value)
+        return
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.Not, ast.USub)):
+        _validate_condition(node.operand)
+        return
+    raise ValueError(f"disallowed expression: {type(node).__name__}")
+
+
+def safe_eval_condition(condition: str, value, hour: int) -> bool:
+    """在受限 AST 上求值硬规则条件，失败时返回 False。"""
+    try:
+        tree = ast.parse(condition, mode="eval")
+        _validate_condition(tree)
+        return bool(
+            eval(compile(tree, "<hard_rule>", "eval"), {"__builtins__": {}}, {"value": value, "hour": hour})
+        )
+    except Exception:
+        return False
 
 
 def check_hard_rules(store: Store, rules: list[dict], device_id: str,
@@ -22,9 +67,8 @@ def check_hard_rules(store: Store, rules: list[dict], device_id: str,
     for rule in rules:
         if rule.get("metric") != metric:
             continue
-        try:
-            hit = eval(rule["condition"], {"__builtins__": {}}, {"value": value, "hour": hour})
-        except Exception:
+        hit = safe_eval_condition(rule.get("condition", ""), value, hour)
+        if not hit:
             continue
         if hit:
             dev = store.get_device(device_id)

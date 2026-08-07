@@ -32,6 +32,8 @@ class HueAdapter(EcosystemAdapter):
         self.bridge_ip = config.get("bridge_ip", "")
         self.username = config.get("username", "")
         self.client_key = config.get("client_key", "")
+        self.verify_tls = bool(config.get("verify_tls", True))
+        self.ca_cert = config.get("ca_cert", "")
         self.base_url = f"https://{self.bridge_ip}/clip/v2"
 
     # ============================================================
@@ -83,7 +85,8 @@ class HueAdapter(EcosystemAdapter):
         headers = {"hue-application-key": self.username}
         r = requests.request(
             method, f"{self.base_url}{path}",
-            headers=headers, json=body, timeout=10, verify=False,  # 自签证书
+            headers=headers, json=body, timeout=10,
+            verify=self.ca_cert or self.verify_tls,
         )
         r.raise_for_status()
         return r.json() if r.text else {}
@@ -185,7 +188,10 @@ class HueAdapter(EcosystemAdapter):
     def _do_health_check(self) -> bool:
         try:
             import requests
-            r = requests.get(f"https://{self.bridge_ip}/clip/v2/resource", timeout=3, verify=False)
+            r = requests.get(
+                f"https://{self.bridge_ip}/clip/v2/resource", timeout=3,
+                verify=self.ca_cert or self.verify_tls,
+            )
             return r.status_code == 200
         except Exception:
             return False
