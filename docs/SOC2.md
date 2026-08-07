@@ -1,5 +1,8 @@
 # SOC2 Type II 认证准备（v2.0）
 
+> **同步状态（2026-08-07）**：本文档已纳入整体同步；与当前实现的差异以 [ARCHITECTURE.md](../ARCHITECTURE.md) 状态表和 `tests/` 为准。
+
+
 > 美国注册会计师协会（AICPA）Trust Services Criteria。
 > B2B SaaS 商业化必备（美国客户必查）。
 > 区别于 SOC2 Type I（单点评估），Type II 需 9-12 月连续观察窗口。

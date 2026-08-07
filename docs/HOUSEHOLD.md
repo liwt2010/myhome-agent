@@ -1,4 +1,7 @@
-﻿# 家务领域（Household）
+# 家务领域（Household）
+
+> **同步状态（2026-08-07）**：本文档已纳入整体同步；与当前实现的差异以 [ARCHITECTURE.md](../ARCHITECTURE.md) 状态表和 `tests/` 为准。
+
 
 > ARCHITECTURE.md §22 的工程级领域模型。本文件给到表的完整字段、隐私分级、P1 最小可行。
 

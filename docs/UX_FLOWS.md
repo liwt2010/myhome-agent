@@ -1,4 +1,7 @@
-﻿# PWA UX 关键流程
+# PWA UX 关键流程
+
+> **同步状态（2026-08-07）**：本文档已纳入整体同步；与当前实现的差异以 [ARCHITECTURE.md](../ARCHITECTURE.md) 状态表和 `tests/` 为准。
+
 
 > ARCHITECTURE.md §13、§16、§19 给的是契约；本文件给 PWA 工程交付的具体页面/状态机/交互细节，可直接当 Storyboard 给前端。
 

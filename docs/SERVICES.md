@@ -1,4 +1,7 @@
-﻿# 服务代办抽象（Services）
+# 服务代办抽象（Services）
+
+> **同步状态（2026-08-07）**：本文档已纳入整体同步；与当前实现的差异以 [ARCHITECTURE.md](../ARCHITECTURE.md) 状态表和 `tests/` 为准。
+
 
 > ARCHITECTURE.md §23 的接口契约与安全设计。本文件给到工程级的 adapter 框架、安全闸门、订单状态机。
 

@@ -6,7 +6,7 @@
 
 ## 核心能力
 
-- 裝置整合：米家（micloud/miio）、塗鴉、Hue、Matter、Zigbee、Thread
+- 裝置整合：米家（micloud/miio）、塗鴉、Hue、Matter、Zigbee、Thread（Matter/Zigbee/Thread 程式碼已接，真機聯調待 chip-tool / 硬體）
 - 規則引擎：跨訊號推理、信賴度校正、LLM 兜底、誤報回饋閉環
 - 視覺管線：RTSP + YOLO 人形/跌倒/火焰偵測、快照儲存與存取控制
 - 自然互動：DeepSeek（預設）等多 LLM 路由、工具呼叫、長期記憶

@@ -6,7 +6,7 @@ Other languages: 简体中文（[README.md](README.md)）· 繁體中文（[READ
 
 ## Core Capabilities
 
-- Device integrations: Mi Home (micloud/miio), Tuya, Hue, Matter, Zigbee, Thread
+- Device integrations: Mi Home (micloud/miio), Tuya, Hue, Matter, Zigbee, Thread (Matter/Zigbee/Thread code is wired; real-device testing awaits chip-tool/hardware)
 - Rule engine: cross-signal reasoning, confidence calibration, LLM fallback, false-positive feedback loop
 - Vision pipeline: RTSP + YOLO person/fall/fire detection, snapshot storage and access control
 - Natural interaction: DeepSeek (default) and multi-LLM routing, tool calling, long-term memory

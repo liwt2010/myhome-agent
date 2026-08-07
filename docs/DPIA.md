@@ -1,5 +1,8 @@
 # 数据保护影响评估（DPIA / DPIA）
 
+> **同步状态（2026-08-07）**：本文档已纳入整体同步；与当前实现的差异以 [ARCHITECTURE.md](../ARCHITECTURE.md) 状态表和 `tests/` 为准。
+
+
 > myhome-agent 家庭智能体 v1.0 GDPR DPIA 完整文档。
 > 评估 4 个高风险数据流：摄像头 / LLM 兜底 / 远程控制 / 视觉事件。
 > 评估方法：CNIL / GDPR Article 35 模板 + EDPB 指南。

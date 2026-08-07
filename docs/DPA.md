@@ -1,5 +1,8 @@
 # 数据保护协议（DPA）+ DPO 角色（v1.0 商业化前置）
 
+> **同步状态（2026-08-07）**：本文档已纳入整体同步；与当前实现的差异以 [ARCHITECTURE.md](../ARCHITECTURE.md) 状态表和 `tests/` 为准。
+
+
 > GDPR Article 37-39 强制要求：处理大规模敏感数据时设 DPO。
 > myhome-agent v1.0 商业化版本（多家庭 SaaS）必须设 DPO。
 > 开源家庭版（≤3 家庭）暂不强制，但建议任命家庭 DPO。

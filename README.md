@@ -6,7 +6,7 @@
 
 ## 核心能力
 
-- 设备接入：米家（micloud/miio）、涂鸦、Hue、Matter、Zigbee、Thread
+- 设备接入：米家（micloud/miio）、涂鸦、Hue、Matter、Zigbee、Thread（Matter/Zigbee/Thread 代码已接，真机联调待 chip-tool / 硬件）
 - 规则引擎：跨信号推理、置信度校准、LLM 兜底、误报反馈闭环
 - 视觉管线：RTSP + YOLO 人形/跌倒/火焰检测、快照落盘与访问控制
 - 自然交互：DeepSeek（默认）等多 LLM 路由、工具调用、长期记忆

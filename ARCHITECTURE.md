@@ -19,6 +19,7 @@
 | 视觉快照访问 | ✅ 已实现 | 检测帧自动落盘 `MYHOME_SNAPSHOT_DIR`，`/api/vision/snapshots/{file}` 提供 RBAC + 防穿越访问 |
 | 视觉事件联动 | ✅ 已实现 | 安全类视觉事件（fall/fire/person）自动生成告警并走通知链路 |
 | 米家云同步 | ⚠️ 部分 | micloud 真实实现已接入，依赖 `pip install micloud`；需真实账号联调 |
+| Matter / Zigbee / Thread | ⚠️ 部分 | `create_adapter` 已接入；chip-tool 命令构造、cluster/device ID 表、返回契约已修并有回归测试；真机联调待 chip-tool/硬件 |
 | KMS | ⚠️ 部分 | 本地 PBKDF2 + salt 轮换 + Fernet 重加密已实现；AWS/GCP/Azure 仍为 stub |
 | 联邦学习 | ⚠️ 部分 | `phe` 真实 Paillier 同态 + DP 噪声已实现；跨家庭密钥分发协议仍为简化实现 |
 | Marketplace / 钱包 | ⚠️ 部分 | 基础转账、escrow 扣款与结算已实现；公开市场未对外 |

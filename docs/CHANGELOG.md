@@ -2,6 +2,28 @@
 
 完整版本史。格式：每个版本包含"重大变更 + 修复 + 已知问题"。
 
+## v2.5 (2026-08-07) — 安全加固 + 批次 A 闭环 + Matter 修复 + 开源准备
+
+### 重大变更
+- 网关鉴权：Bearer token / 成员 JWT / RBAC 权限矩阵 / 2FA 与 WebAuthn 强制场景
+- 通知链路：规则触发 → 告警 → `notification_queue` → Telegram / 站内推送
+- 统一审计 API（`/api/audit/*`）与待确认控制动作（confirm/cancel + 高危设备 2FA）
+- 前端：登录页（成员 / API Token）、WebAuthn 注册与登录、待确认操作、场景与隐私开关接真实后端
+- 视觉：检测帧快照落盘 + RBAC 访问控制 + fall/fire/person 事件告警联动
+- 联邦学习：真实 `phe` Paillier 同态加密 + 差分隐私
+- Matter 修复：官方 cluster/device ID 表、chip-tool 委托、返回契约、commission 参数、温控绝对设定点、编译脚本更新
+- 开源准备：README 三语（简中/英文/繁中）、LICENSE、CONTRIBUTING、GitHub Actions CI、SECURITY
+
+### 修复
+- 安全：JWT 密钥硬编码、WebAuthn 假验签、2FA 信任客户端 secret、A2A 验签自改、硬告警 `eval` 注入、SQLite 跨连接丢写入、Telegram 无白名单
+- 规则引擎：cooldown 到期不复位（规则只触发一次）、`log_fire` 缺少 `detail`、种子规则 DSL 不触发、反馈写入丢失
+- 其他：`members.preferences` 列名错配、依赖声明不全、Hue TLS 校验、钱包 escrow 造币、共识一票通过、快照/通知链路
+
+### 测试
+- `pytest` 35 → 42（新增 Matter 命令构造/ID 表/契约/健康检查回归）
+
+---
+
 ## v2.4 (2026-08-04) — 6 分支真实集成全部落地
 
 ### 重大变更
