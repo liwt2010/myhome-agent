@@ -14,6 +14,8 @@
 - Matter cluster/device ID 表再次校正：AirQuality `0x005B`、SmokeCOAlarm cluster `0x005C`、
   CO/CO2 浓度 `0x040C/0x040D`、BooleanState `0x0045`（Water Leak Detector）、
   Camera device type `0x0142`、PowerSource `0x0011`；能力映射同步
+- 合并 `ChipToolBackend` 与 `ChipToolAdapter` 为统一 chip-tool 后端，命令修正只改一处
+- `discover()` 解析 `discovery list-nodes` 输出为 `EcosystemDevice`；`get_state()` 按多 cluster 读取状态
 - Windows `MATTER_MOCK=1` 脚本 GBK 编码崩溃修复（`sys.stdout.reconfigure(encoding="utf-8")`）
 - MatterAdapter stub 降级改为明确失败，`connect()` 与 `_do_health_check()` 不再自相矛盾
 

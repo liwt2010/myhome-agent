@@ -75,23 +75,6 @@ class TestChipToolWrapper:
         assert ["chip-tool", "pairing", "ble-wifi", "5", "ssid", "pass", "20202021", "3840"] in commands
 
 
-class TestChipToolBackend:
-    def test_read_attribute_and_thermostat(self, monkeypatch):
-        from myhome_agent.collectors.matter_real import ChipToolBackend
-
-        commands = []
-        _patch_run(monkeypatch, commands, stdout="Usage: chip-tool")
-        backend = ChipToolBackend("chip-tool")
-        assert backend.available is True
-        commands.clear()
-
-        backend.read_attribute(1, 2, "TemperatureMeasurement", "MeasuredValue")
-        backend.thermostat(1, 2, 24.0)
-
-        assert ["chip-tool", "temperaturemeasurement", "read", "MeasuredValue", "1", "2"] in commands
-        assert ["chip-tool", "thermostat", "write", "occupied-heating-setpoint", "2400", "1", "2"] in commands
-
-
 class TestRealMatterAdapter:
     def test_execute_action_contract(self, monkeypatch):
         from myhome_agent.collectors.matter_real import RealMatterAdapter
@@ -118,6 +101,34 @@ class TestRealMatterAdapter:
         adapter = RealMatterAdapter({"backend": "chip_tool"})
         assert adapter.connect() is False
         assert adapter._do_health_check() is False
+
+    def test_discover_parses_list_nodes(self, monkeypatch):
+        from myhome_agent.collectors.matter_real import RealMatterAdapter
+
+        def fake_run(cmd, **kwargs):
+            stdout = "NodeId: 0x1234\nNodeId: 0xabcd\n" if "list-nodes" in cmd else "Usage: chip-tool"
+            return _FakeResult(returncode=0, stdout=stdout)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        adapter = RealMatterAdapter({"backend": "chip_tool"})
+        assert adapter.connect() is True
+        devices = adapter.discover()
+        assert {d.ecosystem_id for d in devices} == {"0x1234", "0xabcd"}
+
+    def test_get_state_reads_multiple_clusters(self, monkeypatch):
+        from myhome_agent.collectors.matter_real import RealMatterAdapter
+
+        def fake_run(cmd, **kwargs):
+            stdout = "Usage: chip-tool" if "--help" in cmd else "42"
+            return _FakeResult(returncode=0, stdout=stdout)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        adapter = RealMatterAdapter({"backend": "chip_tool"})
+        assert adapter.connect() is True
+        state = adapter.get_state("1/2")
+        assert "OnOff.OnOff" in state
+        assert "DoorLock.LockState" in state
+        assert "TemperatureMeasurement.MeasuredValue" in state
 
 
 class TestMatterAdapter:

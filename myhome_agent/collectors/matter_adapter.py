@@ -204,7 +204,25 @@ class MatterAdapter(EcosystemAdapter):
         if self._chip_tool is not None:
             result = self._chip_tool.list_nodes()
             if result.success:
-                logger.info("Matter chip-tool: 已列出 fabric 节点")
+                from .chip_tool_wrapper import parse_node_ids
+
+                devices = []
+                for node_id in parse_node_ids(result.stdout):
+                    dev = EcosystemDevice(
+                        ecosystem="matter",
+                        ecosystem_id=node_id,
+                        name=f"Matter Node {node_id}",
+                        type="unknown",
+                        online=True,
+                        capabilities=[],
+                        room="",
+                        model="",
+                        raw_state={},
+                    )
+                    devices.append(dev)
+                    self.register_device(dev)
+                logger.info("Matter chip-tool: 发现 %d 个节点", len(devices))
+                return devices
             else:
                 logger.warning("Matter chip-tool list-nodes 失败: %s", result.stderr[:200])
             return []

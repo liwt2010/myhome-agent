@@ -1,174 +1,25 @@
-"""Matter v1.3 Controller - 真实集成（v2.1.1）
+"""Matter Controller - 真实集成（统一 chip-tool 后端）
 
-v2.1.1 路线（按依赖可用性分 3 档）：
-
-1. **subprocess chip-tool**（推荐 / 生产）
-   - 装 chip-tool（C 编译的二进制）
-   - 我们的 SDK 调 chip-tool 子进程
-   - 完整功能，性能好
-   - 装：https://github.com/project-chip/connectedhomeip
-
-2. **python-chip-clusters**（开发中，未发布 PyPI）
-   - GitHub 源码装
-   - 协议库部分功能
-   - 性能中等
-
-3. **mDNS 探测 + chip 协议**（v2.1.1 完整 stub）
-   - 用 zeroconf 找设备
-   - 协议层 stub
-   - 适合联调测试
-
-依赖：
-    pip install zeroconf>=0.150
-    # chip-tool 单独装（不通过 pip）
+后端策略：
+1. chip-tool（生产）：统一委托 `chip_tool_wrapper.ChipToolAdapter`
+2. mDNS（开发）：zeroconf 探测（仅发现，不做协议）
+3. stub（默认）：明确返回不可用
 """
 from __future__ import annotations
 
 import logging
-import subprocess
 import time
 from typing import Any
 
+from .chip_tool_wrapper import ChipToolAdapter, is_chip_tool_available, parse_node_ids
 from .ecosystem import Capability, EcosystemAdapter, EcosystemDevice
 from .matter_adapter import MATTER_DEVICE_TYPES, MATTER_TO_UNIFIED_TYPE
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# chip-tool 后端
-# ============================================================
-
-
-class ChipToolBackend:
-    """v2.1.1 通过 chip-tool 命令行控制真实 Matter 设备
-
-    chip-tool 用法：
-        chip-tool pairing ble-thread 1 20202021 3840
-        chip-tool onoff on 1 1
-    """
-
-    def __init__(self, chip_tool_path: str = "chip-tool"):
-        self.chip_tool = chip_tool_path
-        self.available = False
-        self._verify_installation()
-
-    def _verify_installation(self) -> None:
-        try:
-            result = subprocess.run(
-                [self.chip_tool, "--help"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                logger.warning(f"chip-tool 不可用: {result.stderr[:200]}")
-            else:
-                self.available = True
-        except FileNotFoundError:
-            logger.warning(
-                f"chip-tool 未找到（{self.chip_tool}）。"
-                "v2.1.1 需装：https://github.com/project-chip/connectedhomeip"
-            )
-        except Exception as e:
-            logger.error(f"chip-tool 验证失败: {e}")
-
-    def _run(self, *args, timeout: int = 30) -> dict:
-        """执行 chip-tool 命令"""
-        try:
-            result = subprocess.run(
-                [self.chip_tool, *args],
-                capture_output=True, text=True, timeout=timeout,
-            )
-            return {
-                "success": result.returncode == 0,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            }
-        except FileNotFoundError:
-            return {"success": False, "error": "chip-tool not installed"}
-        except subprocess.TimeoutExpired:
-            return {"success": False, "error": "chip-tool timeout"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def pair(
-        self,
-        setup_passcode: int,
-        discriminator: int,
-        node_id: int = 1,
-        thread_dataset_hex: str | None = None,
-    ) -> dict:
-        """commissioning（BLE + Thread：node [hex:dataset] pin discriminator）"""
-        args = ["pairing", "ble-thread", str(node_id)]
-        if thread_dataset_hex:
-            dataset = thread_dataset_hex if thread_dataset_hex.startswith("hex:") else f"hex:{thread_dataset_hex}"
-            args.append(dataset)
-        args.extend([str(setup_passcode), str(discriminator)])
-        return self._run(*args)
-
-    def onoff(self, node_id: int, endpoint: int, on: bool) -> dict:
-        """OnOff cluster 命令"""
-        cmd = "on" if on else "off"
-        return self._run("onoff", cmd, str(node_id), str(endpoint))
-
-    def level(self, node_id: int, endpoint: int, level: int) -> dict:
-        """Level cluster（亮度）"""
-        return self._run(
-            "levelcontrol", "move-to-level",
-            str(level), "0", "0", "0", str(node_id), str(endpoint),
-        )
-
-    def color_temp(self, node_id: int, endpoint: int, mireds: int) -> dict:
-        """ColorTemperature cluster"""
-        return self._run(
-            "colorcontrol", "move-to-color-temperature",
-            str(mireds), "0", "0", "0", str(node_id), str(endpoint),
-        )
-
-    def lock(self, node_id: int, endpoint: int, lock: bool) -> dict:
-        """DoorLock cluster"""
-        cmd = "lock-door" if lock else "unlock-door"
-        return self._run("doorlock", cmd, str(node_id), str(endpoint))
-
-    def thermostat(self, node_id: int, endpoint: int, target_temp_c: float) -> dict:
-        """Thermostat cluster"""
-        attribute = "occupied-heating-setpoint"
-        return self._run(
-            "thermostat", "write", attribute,
-            str(int(round(target_temp_c * 100))),
-            str(node_id), str(endpoint),
-        )
-
-    def read_attribute(self, node_id: int, endpoint: int, cluster: str, attribute: str) -> dict:
-        return self._run(
-            self._cluster_to_path(cluster), "read",
-            attribute, str(node_id), str(endpoint),
-        )
-
-    def _cluster_to_path(self, cluster: str) -> str:
-        """cluster 名 → chip-tool 子命令路径"""
-        MAP = {
-            "OnOff": "onoff",
-            "Level": "levelcontrol",
-            "ColorControl": "colorcontrol",
-            "DoorLock": "doorlock",
-            "Thermostat": "thermostat",
-            "WindowCovering": "windowcovering",
-            "IlluminanceMeasurement": "illuminancemeasurement",
-            "TemperatureMeasurement": "temperaturemeasurement",
-        }
-        return MAP.get(cluster, cluster.lower())
-
-
-# ============================================================
-# mDNS 后端（v2.1.1 fallback）
-# ============================================================
-
-
 class MdnsBackend:
-    """v2.1.1 zeroconf mDNS 探测 Matter 设备
-
-    Matter 设备用 _matter._tcp.local. 服务发现
-    """
+    """zeroconf mDNS 探测 Matter 设备（_matter._tcp.local.）"""
 
     def __init__(self):
         self._zeroconf = None
@@ -177,6 +28,7 @@ class MdnsBackend:
     def connect(self) -> bool:
         try:
             from zeroconf import ServiceBrowser, Zeroconf
+
             self._zeroconf = Zeroconf()
             self._browsers["_matter._tcp.local."] = ServiceBrowser(
                 self._zeroconf, "_matter._tcp.local.",
@@ -198,7 +50,6 @@ class MdnsBackend:
                 logger.info(f"发现 Matter 设备: {name} @ {info.parsed_addresses()}")
 
     def discover(self, timeout_seconds: int = 5) -> list[dict]:
-        """v2.1.1 简易发现：扫描 _matter._tcp"""
         time.sleep(timeout_seconds)
         services = []
         if not self._zeroconf:
@@ -220,19 +71,8 @@ class MdnsBackend:
             self._zeroconf.close()
 
 
-# ============================================================
-# Real Matter Adapter
-# ============================================================
-
-
 class RealMatterAdapter(EcosystemAdapter):
-    """v2.1.1 Matter controller 真实集成
-
-    三档 backend：
-    1. chip-tool（生产）
-    2. mDNS + 协议 stub（开发）
-    3. 完全 stub（默认）
-    """
+    """Matter controller 真实集成（chip-tool 统一后端）"""
 
     def __init__(self, config: dict):
         super().__init__("matter", config)
@@ -247,53 +87,89 @@ class RealMatterAdapter(EcosystemAdapter):
 
     def connect(self) -> bool:
         if self.backend_type == "chip_tool":
-            self.backend = ChipToolBackend(self.chip_tool_path)
-            self._healthy = self.backend.available
+            if not is_chip_tool_available(self.chip_tool_path):
+                self._healthy = False
+                logger.warning("chip-tool 不可用（%s）", self.chip_tool_path)
+                return False
+            self.backend = ChipToolAdapter(
+                chip_tool_path=self.chip_tool_path,
+                fabric_id=int(self.fabric_id) if str(self.fabric_id).isdigit() else 1,
+                node_id=self.node_id,
+            )
+            self._healthy = True
             logger.info("Matter backend: chip-tool")
-            return self._healthy
-        elif self.backend_type == "mdns":
+            return True
+        if self.backend_type == "mdns":
             self.mdns = MdnsBackend()
             ok = self.mdns.connect()
             self._healthy = ok
             logger.info(f"Matter backend: mDNS (healthy={ok})")
             return ok
-        else:
-            # stub 模式
-            self._healthy = True
-            logger.warning(
-                "Matter backend: stub（v2.1.1 真实集成需装 chip-tool 或 zeroconf）"
-            )
-            return True
+        logger.warning("Matter backend: stub（无可用后端，connect 失败）")
+        self._healthy = False
+        return False
 
     def disconnect(self) -> None:
         self._healthy = False
         if self.mdns:
             self.mdns.close()
 
-    def commission(self, setup_passcode: int, discriminator: int = 3840) -> bool:
-        if not self.backend:
-            return False
-        if self.backend_type == "chip_tool":
-            result = self.backend.pair(setup_passcode, discriminator)
-            return result.get("success", False)
+    def commission(
+        self,
+        setup_passcode: int,
+        discriminator: int = 3840,
+        thread_dataset_hex: str | None = None,
+    ) -> bool:
+        if self.backend_type == "chip_tool" and self.backend:
+            result = self.backend.commission(
+                setup_passcode,
+                discriminator,
+                node_id=self.node_id,
+                thread_dataset_hex=thread_dataset_hex,
+            )
+            return bool(result.success)
         return False
 
     def discover(self) -> list[EcosystemDevice]:
         if self.backend_type == "mdns" and self.mdns:
             services = self.mdns.discover(timeout_seconds=5)
-            return [self._mdns_to_device(s) for s in services]
-
-        # stub
+            devices = [self._mdns_to_device(s) for s in services]
+            for dev in devices:
+                self.register_device(dev)
+            return devices
+        if self.backend_type == "chip_tool" and self.backend:
+            result = self.backend.list_nodes()
+            if not result.success:
+                logger.warning("Matter chip-tool list-nodes 失败: %s", result.stderr[:200])
+                return []
+            devices = []
+            for node_id in parse_node_ids(result.stdout):
+                dev = self._node_to_device(node_id)
+                devices.append(dev)
+                self.register_device(dev)
+            return devices
         return []
 
+    @staticmethod
+    def _node_to_device(node_id: str) -> EcosystemDevice:
+        return EcosystemDevice(
+            ecosystem="matter",
+            ecosystem_id=node_id,
+            name=f"Matter Node {node_id}",
+            type="unknown",
+            online=True,
+            capabilities=[],
+            room="",
+            model="",
+            raw_state={},
+        )
+
     def _mdns_to_device(self, service: dict) -> EcosystemDevice:
-        """mDNS service → EcosystemDevice"""
         name = service.get("name", "Unknown")
         addresses = service.get("addresses", [])
         port = service.get("port", 5540)
         props = service.get("properties", {})
 
-        # 解析 properties（TXT 值为 bytes；"md" 不是标准键，回退默认 0x0100）
         def _prop(key: str, default: str = "") -> str:
             value = props.get(key, default)
             if isinstance(value, (bytes, bytearray)):
@@ -307,12 +183,10 @@ class RealMatterAdapter(EcosystemAdapter):
             dt_id = 0x0100
         dt_name = MATTER_DEVICE_TYPES.get(dt_id, "Unknown")
         type_str, cap_names = MATTER_TO_UNIFIED_TYPE.get(dt_name, ("unknown", []))
-
         caps = [
             Capability(name=cn, access="rw", source_ecosystem="matter")
             for cn in cap_names
         ]
-
         return EcosystemDevice(
             ecosystem="matter",
             ecosystem_id=_prop("id", addresses[0] if addresses else "unknown"),
@@ -333,65 +207,80 @@ class RealMatterAdapter(EcosystemAdapter):
 
     def execute_action(self, device_id: str, action: str, params=None) -> dict:
         if not self.backend or self.backend_type != "chip_tool":
-            return {"success": False, "message": "chip-tool backend required"}
-
-        # 提取 node_id + endpoint
+            return {"success": False, "state": None, "message": "chip-tool backend required"}
         try:
             node_id, endpoint = self._parse_device_id(device_id)
         except Exception as e:
-            return {"success": False, "message": f"device_id 格式错: {e}"}
+            return {"success": False, "state": None, "message": f"device_id 格式错: {e}"}
 
         params = params or {}
-
         if action == "light.toggle":
             raw = self.backend.onoff(node_id, endpoint, params.get("on", True))
         elif action == "light.brightness":
             raw = self.backend.level(node_id, endpoint, params.get("brightness", 100))
         elif action == "light.color_temp":
-            raw = self.backend.color_temp(node_id, endpoint, params.get("color_temp", 300))
+            raw = self.backend.color_temperature(node_id, endpoint, params.get("color_temp", 300))
         elif action == "lock.lock":
-            raw = self.backend.lock(node_id, endpoint, True)
+            raw = self.backend.lock_door(node_id, endpoint)
         elif action == "lock.unlock":
-            raw = self.backend.lock(node_id, endpoint, False)
+            raw = self.backend.unlock_door(node_id, endpoint)
         elif action == "ac.target_temp":
-            raw = self.backend.thermostat(node_id, endpoint, params.get("target_temp", 22))
+            raw = self.backend.thermostat_setpoint(node_id, endpoint, params.get("target_temp", 22))
         else:
             return {"success": False, "state": None, "message": f"未支持: {action}"}
         return self._wrap_result(raw)
 
     @staticmethod
-    def _wrap_result(raw: dict) -> dict:
-        ok = bool(raw.get("success", False))
-        return {
-            "success": ok,
-            "state": {"stdout": raw.get("stdout", ""), "stderr": raw.get("stderr", "")},
-            "message": "OK" if ok else raw.get("error", "chip-tool 命令失败"),
-        }
-
-    def _parse_device_id(self, device_id: str) -> tuple[int, int]:
-        """device_id 格式: 'node_id/endpoint'"""
+    def _parse_device_id(device_id: str) -> tuple[int, int]:
         if "/" in device_id:
             node, ep = device_id.split("/", 1)
             return int(node), int(ep)
-        # 默认 endpoint 1
         return int(device_id), 1
+
+    @staticmethod
+    def _wrap_result(raw) -> dict:
+        if hasattr(raw, "success"):
+            ok = bool(raw.success)
+            stdout = getattr(raw, "stdout", "")
+            stderr = getattr(raw, "stderr", "")
+            message = "OK" if ok else "chip-tool 命令失败"
+        else:
+            ok = bool(raw.get("success", False))
+            stdout = raw.get("stdout", "")
+            stderr = raw.get("stderr", "")
+            message = "OK" if ok else raw.get("error", "chip-tool 命令失败")
+        return {
+            "success": ok,
+            "state": {"stdout": stdout, "stderr": stderr},
+            "message": message,
+        }
 
     def get_state(self, device_id: str) -> dict:
         if not self.backend or self.backend_type != "chip_tool":
             return {}
         try:
             node_id, endpoint = self._parse_device_id(device_id)
-            # 读 OnOff 状态
-            result = self.backend.read_attribute(node_id, endpoint, "onoff", "OnOff")
-            return result
         except Exception:
             return {}
 
+        reads = [
+            ("OnOff", "OnOff"),
+            ("Level", "CurrentLevel"),
+            ("DoorLock", "LockState"),
+            ("Thermostat", "OccupiedHeatingSetpoint"),
+            ("TemperatureMeasurement", "MeasuredValue"),
+        ]
+        state = {}
+        for cluster, attribute in reads:
+            raw = self.backend.read_attribute(node_id, endpoint, cluster, attribute)
+            wrapped = self._wrap_result(raw)
+            if wrapped["success"]:
+                state[f"{cluster}.{attribute}"] = wrapped["state"]["stdout"].strip()[:200]
+        return state
+
     def _do_health_check(self) -> bool:
-        if self.backend_type == "stub":
-            return self._healthy
         if self.backend_type == "chip_tool":
-            return self._healthy and self.backend is not None and getattr(self.backend, "available", False)
+            return self._healthy and self.backend is not None and is_chip_tool_available(self.chip_tool_path)
         if self.backend_type == "mdns":
             return self._healthy and self.mdns is not None
         return False

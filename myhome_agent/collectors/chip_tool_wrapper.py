@@ -12,12 +12,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+NODE_ID_RE = re.compile(r"NodeId:\s*(0x[0-9a-fA-F]+|\d+)", re.IGNORECASE)
+
+
+def parse_node_ids(stdout: str) -> list[str]:
+    """从 `chip-tool discovery list-nodes` 输出中解析 node-id。"""
+    return [m.group(1) for m in NODE_ID_RE.finditer(stdout or "")]
 
 
 @dataclass
