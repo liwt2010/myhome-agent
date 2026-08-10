@@ -65,8 +65,8 @@ class ChipToolAdapter:
                 f"chip-tool 不可用：{self.chip_tool}\n"
                 "v2.2 真实集成需编译 connectedhomeip。\n"
                 "  编译：git clone https://github.com/project-chip/connectedhomeip\n"
-                "        cd connectedhomeip && ./script/bootstrap\n"
-                "        ./script/build platform/raspbian\n"
+                "        cd connectedhomeip && ./scripts/bootstrap.sh\n"
+                "        ./scripts/build.sh\n"
                 "  路径：export PATH=$PWD/out/<platform>/chip-tool:$PATH"
             )
         except Exception as e:
@@ -141,8 +141,8 @@ class ChipToolAdapter:
         """Level 集群：亮度/音量 0-254"""
         return self._run(
             "levelcontrol", "move-to-level",
+            str(level), str(transition_time_ms), "0", "0",
             str(node_id), str(endpoint),
-            str(level), str(transition_time_ms),
         )
 
     def color_temperature(
@@ -151,8 +151,8 @@ class ChipToolAdapter:
         """ColorTemperature 集群：色温（mireds）"""
         return self._run(
             "colorcontrol", "move-to-color-temperature",
-            str(node_id), str(endpoint), str(mireds),
-            "0", "0", "0",
+            str(mireds), "0", "0", "0",
+            str(node_id), str(endpoint),
         )
 
     def lock_door(self, node_id: int, endpoint: int) -> ChipToolResult:
@@ -183,7 +183,7 @@ class ChipToolAdapter:
         """读 cluster attribute"""
         return self._run(
             self._cluster_to_path(cluster), "read",
-            str(node_id), str(endpoint), attribute,
+            attribute, str(node_id), str(endpoint),
         )
 
     def _cluster_to_path(self, cluster: str) -> str:
@@ -209,15 +209,15 @@ class ChipToolAdapter:
         node_id: int | None = None, thread_dataset_hex: str | None = None,
         timeout: int = 120,
     ) -> ChipToolResult:
-        """Matter commissioning（BLE + Thread；第一个位置参数是 node-id）"""
+        """Matter commissioning（BLE + Thread：node [hex:dataset] pin discriminator）"""
         args = [
             "pairing", "ble-thread",
             str(node_id if node_id is not None else self.node_id),
-            str(discriminator),
-            str(setup_passcode),
         ]
         if thread_dataset_hex:
-            args.append(thread_dataset_hex)
+            dataset = thread_dataset_hex if thread_dataset_hex.startswith("hex:") else f"hex:{thread_dataset_hex}"
+            args.append(dataset)
+        args.extend([str(setup_passcode), str(discriminator)])
         return self._run(
             *args,
             timeout=timeout,
@@ -229,11 +229,11 @@ class ChipToolAdapter:
         setup_passcode: int, discriminator: int = 3840,
         timeout: int = 180,
     ) -> ChipToolResult:
-        """Matter commissioning（BLE + Wi-Fi，适配 WiFi Matter 设备）"""
+        """Matter commissioning（BLE + Wi-Fi：node ssid password pin discriminator）"""
         return self._run(
             "pairing", "ble-wifi",
             str(node_id), ssid, password,
-            str(discriminator), str(setup_passcode),
+            str(setup_passcode), str(discriminator),
             timeout=timeout,
         )
 

@@ -33,7 +33,7 @@ MATTER_DEVICE_TYPES = {
     0x000A: "DoorLock",
     0x000B: "DoorLockController",
     0x000F: "GenericSwitch",
-    0x0011: "Camera",
+    0x0011: "PowerSource",
     0x0015: "ContactSensor",
     0x002C: "AirQualitySensor",
     0x0043: "WaterLeakDetector",
@@ -46,6 +46,7 @@ MATTER_DEVICE_TYPES = {
     0x0107: "OccupancySensor",
     0x010C: "ColorTemperatureLight",
     0x010D: "ExtendedColorLight",
+    0x0142: "Camera",
     0x0301: "Thermostat",
     0x0302: "TemperatureSensor",
     0x0307: "HumiditySensor",
@@ -67,12 +68,11 @@ MATTER_CLUSTERS = {
     0x0402: ("TemperatureMeasurement", "r"),
     0x0405: "RelativeHumidityMeasurement",
     0x0406: "OccupancySensing",
-    0x0050: "AirQuality",
-    0x0051: "CarbonMonoxideConcentrationMeasurement",
-    0x0052: "CarbonDioxideConcentrationMeasurement",
-    0x0076: "SmokeCOAlarm",
-    0x0099: "WaterFreezeDetector",
-    0x009A: "WaterLeakDetector",
+    0x0045: "BooleanState",
+    0x005B: "AirQuality",
+    0x005C: "SmokeCOAlarm",
+    0x040C: "CarbonMonoxideConcentrationMeasurement",
+    0x040D: "CarbonDioxideConcentrationMeasurement",
 }
 
 
@@ -81,16 +81,22 @@ MATTER_TO_UNIFIED_TYPE = {
     "OnOffLight": ("light", ["light.toggle", "light.brightness"]),
     "DimmableLight": ("light", ["light.toggle", "light.brightness"]),
     "ColorTemperatureLight": ("light", ["light.toggle", "light.brightness", "light.color_temp"]),
+    "ExtendedColorLight": ("light", ["light.toggle", "light.brightness", "light.color_temp", "light.color_hue"]),
     "OnOffLightSwitch": ("controller", []),
+    "DimmerSwitch": ("controller", []),
+    "GenericSwitch": ("controller", []),
+    "DoorLockController": ("controller", []),
     "Thermostat": ("ac", ["ac.target_temp", "ac.mode", "ac.fan_mode"]),
     "TemperatureSensor": ("sensor_temperature", ["sensor.temperature"]),
     "HumiditySensor": ("sensor_humidity", ["sensor.humidity"]),
     "DoorLock": ("lock", ["lock.lock", "lock.unlock"]),
     "LightSensor": ("sensor_light", ["sensor.illuminance"]),
     "OccupancySensor": ("sensor_occupancy", ["sensor.occupancy"]),
+    "ContactSensor": ("sensor_contact", ["sensor.contact"]),
     "WaterLeakDetector": ("sensor_water_leak", ["sensor.water_leak"]),
-    "SmokeAlarm": ("smoke_detector", ["sensor.smoke"]),
+    "SmokeCoAlarm": ("smoke_detector", ["sensor.smoke"]),
     "AirQualitySensor": ("sensor_air_quality", ["sensor.air_quality"]),
+    "PowerSource": ("power_source", ["sensor.power"]),
 }
 
 
@@ -104,9 +110,9 @@ CLUSTER_TO_CAPABILITY = {
     0x0101: "lock.lock",             # DoorLock
     0x0400: "sensor.illuminance",    # IlluminanceMeasurement
     0x0405: "sensor.humidity",       # RelativeHumidityMeasurement
-    0x0050: "sensor.air_quality",    # AirQuality
-    0x0076: "sensor.smoke",          # SmokeCOAlarm
-    0x009A: "sensor.water_leak",     # WaterLeakDetector
+    0x005B: "sensor.air_quality",    # AirQuality
+    0x005C: "sensor.smoke",          # SmokeCOAlarm
+    0x0045: "sensor.water_leak",     # BooleanState（Water Leak Detector 用）
 }
 
 
@@ -158,9 +164,9 @@ class MatterAdapter(EcosystemAdapter):
             logger.info(f"Matter controller 连接成功 (fabric={self.fabric_id})")
             return True
         except ImportError:
-            logger.warning("matter-controller 未装；v2.1.0 stub 模式（仅 capability 映射）")
-            self._healthy = True
-            return True
+            logger.warning("无可用 Matter backend（chip-tool 与 matter-controller 均未装）")
+            self._healthy = False
+            return False
         except Exception as e:
             logger.error(f"Matter controller 连接失败: {e}")
             return False

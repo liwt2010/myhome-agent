@@ -2,6 +2,23 @@
 
 完整版本史。格式：每个版本包含"重大变更 + 修复 + 已知问题"。
 
+## v2.5.1 (2026-08-10) — Matter 真机联调前置修复
+
+### 修复
+- chip-tool 命令参数顺序按官方 guide 修正并同步测试断言：
+  `pairing ble-thread <node> hex:<dataset> <pin> <discriminator>`、
+  `pairing ble-wifi <node> <ssid> <password> <pin> <discriminator>`、
+  `read <attribute> <node> <endpoint>`、
+  `move-to-level <level> <transition> <mask> <override> <node> <endpoint>`、
+  `move-to-color-temperature <mireds> <transition> <mask> <override> <node> <endpoint>`
+- Matter cluster/device ID 表再次校正：AirQuality `0x005B`、SmokeCOAlarm cluster `0x005C`、
+  CO/CO2 浓度 `0x040C/0x040D`、BooleanState `0x0045`（Water Leak Detector）、
+  Camera device type `0x0142`、PowerSource `0x0011`；能力映射同步
+- Windows `MATTER_MOCK=1` 脚本 GBK 编码崩溃修复（`sys.stdout.reconfigure(encoding="utf-8")`）
+- MatterAdapter stub 降级改为明确失败，`connect()` 与 `_do_health_check()` 不再自相矛盾
+
+---
+
 ## v2.5 (2026-08-07) — 安全加固 + 批次 A 闭环 + Matter 修复 + 开源准备
 
 ### 重大变更

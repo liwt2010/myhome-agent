@@ -27,15 +27,25 @@ class TestIdTables:
 
         assert MATTER_DEVICE_TYPES[0x0100] == "OnOffLight"
         assert MATTER_DEVICE_TYPES[0x0301] == "Thermostat"
+        assert MATTER_DEVICE_TYPES[0x0011] == "PowerSource"
+        assert MATTER_DEVICE_TYPES[0x0142] == "Camera"
         assert 0x0101 in MATTER_CLUSTERS       # DoorLock
         assert 0x0201 in MATTER_CLUSTERS       # Thermostat
         assert 0x0402 in MATTER_CLUSTERS       # TemperatureMeasurement
         assert 0x0400 in MATTER_CLUSTERS       # IlluminanceMeasurement
         assert 0x0406 in MATTER_CLUSTERS       # OccupancySensing
+        assert 0x005B in MATTER_CLUSTERS       # AirQuality
+        assert 0x005C in MATTER_CLUSTERS       # SmokeCOAlarm
+        assert 0x040C in MATTER_CLUSTERS       # CO concentration
+        assert 0x040D in MATTER_CLUSTERS       # CO2 concentration
+        assert 0x0045 in MATTER_CLUSTERS       # BooleanState
         assert CLUSTER_TO_CAPABILITY[0x0101] == "lock.lock"
         assert CLUSTER_TO_CAPABILITY[0x0201] == "ac.target_temp"
         assert CLUSTER_TO_CAPABILITY[0x0402] == "sensor.temperature"
         assert CLUSTER_TO_CAPABILITY[0x0400] == "sensor.illuminance"
+        assert CLUSTER_TO_CAPABILITY[0x005B] == "sensor.air_quality"
+        assert CLUSTER_TO_CAPABILITY[0x005C] == "sensor.smoke"
+        assert CLUSTER_TO_CAPABILITY[0x0045] == "sensor.water_leak"
 
 
 class TestChipToolWrapper:
@@ -58,11 +68,11 @@ class TestChipToolWrapper:
         adapter.pair_ble_wifi(5, "ssid", "pass", 20202021, 3840)
 
         assert ["chip-tool", "onoff", "on", "1", "2"] in commands
-        assert ["chip-tool", "levelcontrol", "move-to-level", "1", "2", "100", "0"] in commands
+        assert ["chip-tool", "levelcontrol", "move-to-level", "100", "0", "0", "0", "1", "2"] in commands
         assert ["chip-tool", "thermostat", "write", "occupied-heating-setpoint", "2400", "1", "2"] in commands
-        assert ["chip-tool", "thermostat", "read", "1", "2", "OccupiedHeatingSetpoint"] in commands
-        assert ["chip-tool", "pairing", "ble-thread", "5", "3840", "20202021", "abcd"] in commands
-        assert ["chip-tool", "pairing", "ble-wifi", "5", "ssid", "pass", "3840", "20202021"] in commands
+        assert ["chip-tool", "thermostat", "read", "OccupiedHeatingSetpoint", "1", "2"] in commands
+        assert ["chip-tool", "pairing", "ble-thread", "5", "hex:abcd", "20202021", "3840"] in commands
+        assert ["chip-tool", "pairing", "ble-wifi", "5", "ssid", "pass", "20202021", "3840"] in commands
 
 
 class TestChipToolBackend:
@@ -78,7 +88,7 @@ class TestChipToolBackend:
         backend.read_attribute(1, 2, "TemperatureMeasurement", "MeasuredValue")
         backend.thermostat(1, 2, 24.0)
 
-        assert ["chip-tool", "temperaturemeasurement", "read", "1", "2", "MeasuredValue"] in commands
+        assert ["chip-tool", "temperaturemeasurement", "read", "MeasuredValue", "1", "2"] in commands
         assert ["chip-tool", "thermostat", "write", "occupied-heating-setpoint", "2400", "1", "2"] in commands
 
 

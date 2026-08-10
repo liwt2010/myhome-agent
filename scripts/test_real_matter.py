@@ -15,6 +15,13 @@ import sys
 
 sys.path.insert(0, ".")
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 _IS_MOCK = os.getenv("MATTER_MOCK") == "1"
 
 
@@ -37,12 +44,15 @@ class _FakeChipToolAdapter:
         return self._run("onoff", "on" if on else "off", str(node_id), str(endpoint))
 
     def level(self, node_id, endpoint, level):
-        return self._run("levelcontrol", "move-to-level", str(node_id), str(endpoint), str(level))
+        return self._run(
+            "levelcontrol", "move-to-level",
+            str(level), "0", "0", "0", str(node_id), str(endpoint),
+        )
 
     def color_temperature(self, node_id, endpoint, mireds):
         return self._run(
             "colorcontrol", "move-to-color-temperature",
-            str(node_id), str(endpoint), str(mireds), "0", "0", "0",
+            str(mireds), "0", "0", "0", str(node_id), str(endpoint),
         )
 
     def lock_door(self, node_id, endpoint):
@@ -60,20 +70,22 @@ class _FakeChipToolAdapter:
         )
 
     def read_attribute(self, node_id, endpoint, cluster, attribute):
-        return self._run(cluster.lower(), "read", str(node_id), str(endpoint), attribute)
+        return self._run(cluster.lower(), "read", attribute, str(node_id), str(endpoint))
 
     def commission(self, setup_passcode, discriminator=3840, node_id=None,
                    thread_dataset_hex=None, timeout=120):
-        args = ["pairing", "ble-thread", str(node_id or 1), str(discriminator), str(setup_passcode)]
+        args = ["pairing", "ble-thread", str(node_id or 1)]
         if thread_dataset_hex:
-            args.append(thread_dataset_hex)
+            dataset = thread_dataset_hex if thread_dataset_hex.startswith("hex:") else f"hex:{thread_dataset_hex}"
+            args.append(dataset)
+        args.extend([str(setup_passcode), str(discriminator)])
         return self._run(*args)
 
     def pair_ble_wifi(self, node_id, ssid, password, setup_passcode,
                       discriminator=3840, timeout=180):
         return self._run(
             "pairing", "ble-wifi",
-            str(node_id), ssid, password, str(discriminator), str(setup_passcode),
+            str(node_id), ssid, password, str(setup_passcode), str(discriminator),
         )
 
 

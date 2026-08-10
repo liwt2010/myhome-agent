@@ -24,8 +24,9 @@ git submodule update --init --recursive
 # 编译（30-60 分钟）
 ./scripts/build.sh
 
-# 安装
-sudo cp out/raspbian-x64/chip-tool /usr/local/bin/
+# 安装（实际产物目录随平台/构建配置变化，用 find 定位）
+CHIP_BIN=$(find out -name chip-tool -type f | head -1)
+sudo cp "$CHIP_BIN" /usr/local/bin/
 sudo chmod +x /usr/local/bin/chip-tool
 
 # 验证

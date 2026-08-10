@@ -97,10 +97,12 @@ class ChipToolBackend:
         node_id: int = 1,
         thread_dataset_hex: str | None = None,
     ) -> dict:
-        """commissioning（BLE + Thread；node-id 是第一个位置参数）"""
-        args = ["pairing", "ble-thread", str(node_id), str(discriminator), str(setup_passcode)]
+        """commissioning（BLE + Thread：node [hex:dataset] pin discriminator）"""
+        args = ["pairing", "ble-thread", str(node_id)]
         if thread_dataset_hex:
-            args.append(thread_dataset_hex)
+            dataset = thread_dataset_hex if thread_dataset_hex.startswith("hex:") else f"hex:{thread_dataset_hex}"
+            args.append(dataset)
+        args.extend([str(setup_passcode), str(discriminator)])
         return self._run(*args)
 
     def onoff(self, node_id: int, endpoint: int, on: bool) -> dict:
@@ -110,13 +112,16 @@ class ChipToolBackend:
 
     def level(self, node_id: int, endpoint: int, level: int) -> dict:
         """Level cluster（亮度）"""
-        return self._run("levelcontrol", "move-to-level", str(node_id), str(endpoint), str(level))
+        return self._run(
+            "levelcontrol", "move-to-level",
+            str(level), "0", "0", "0", str(node_id), str(endpoint),
+        )
 
     def color_temp(self, node_id: int, endpoint: int, mireds: int) -> dict:
         """ColorTemperature cluster"""
         return self._run(
             "colorcontrol", "move-to-color-temperature",
-            str(node_id), str(endpoint), str(mireds), "0", "0", "0",
+            str(mireds), "0", "0", "0", str(node_id), str(endpoint),
         )
 
     def lock(self, node_id: int, endpoint: int, lock: bool) -> dict:
@@ -136,7 +141,7 @@ class ChipToolBackend:
     def read_attribute(self, node_id: int, endpoint: int, cluster: str, attribute: str) -> dict:
         return self._run(
             self._cluster_to_path(cluster), "read",
-            str(node_id), str(endpoint), attribute,
+            attribute, str(node_id), str(endpoint),
         )
 
     def _cluster_to_path(self, cluster: str) -> str:
